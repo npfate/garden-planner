@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Базовые стили для приложения */
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #F5F7FA;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  overflow: hidden; /* Убираем скролл у основного приложения */
+}
+
+/* Классы для панелей (используем @apply для переиспользования) */
+@layer components {
+  .panel {
+    @apply bg-surface shadow-panel;
+  }
+  
+  .panel-header {
+    @apply px-4 py-3 border-b border-border font-semibold text-text-primary;
+  }
+  
+  .btn-primary {
+    @apply px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors;
+  }
+}
