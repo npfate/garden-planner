@@ -1,6 +1,7 @@
    # Changelog
-   
-   ## [Unreleased]
-   - Инициализация проекта (Vite + React + TypeScript + Tailwind)
-   - Создание базового Layout
-   - Архитектура типов данных (Future-Proof)
+
+## [Unreleased]
+- Инициализация git репозитория (ветка master)
+- Создание .gitignore для Node.js / Vite / React проекта
+- Первый коммит (PROMPT.MD, ROADMAP.md, RULES.MD, CHANGELOG.md, .gitignore)
+- Настройка локальной Git identity (GardenPlanner Dev <dev@gardenplanner.local>)
