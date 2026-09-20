@@ -14,6 +14,57 @@ function sendObjectToBottom(canvas: Canvas, obj: Line | Group | FabricImage): vo
   canvas.renderAll();
 }
 
+function findBackground(canvas: Canvas): FabricImage | undefined {
+  return canvas.getObjects().find((o) => {
+    if (!(o instanceof FabricImage)) return false;
+    // @ts-expect-error custom runtime property
+    return o.__gardenBackground === true;
+  }) as FabricImage | undefined;
+}
+
+function removeBackground(canvas: Canvas): void {
+  const bg = findBackground(canvas);
+  if (bg) canvas.remove(bg);
+}
+
+export async function loadBackgroundImage(canvas: Canvas, url: string): Promise<void> {
+  const img = await FabricImage.fromURL(url, {
+    crossOrigin: 'anonymous',
+  });
+  removeBackground(canvas);
+  const cw = canvas.getWidth();
+  const ch = canvas.getHeight();
+  const iw = img.width ?? cw;
+  const ih = img.height ?? ch;
+  const scale = Math.min(cw / iw, ch / ih, 1);
+  img.set({
+    left: (cw - iw * scale) / 2,
+    top: (ch - ih * scale) / 2,
+    scaleX: scale,
+    scaleY: scale,
+    selectable: true,
+    evented: true,
+    hasControls: true,
+  });
+  // @ts-expect-error custom runtime flag
+  img.__gardenBackground = true;
+  canvas.add(img);
+  canvas.sendObjectToBack(img);
+  canvas.renderAll();
+}
+
+export function setBackgroundSelectable(canvas: Canvas, selectable: boolean): void {
+  const bg = findBackground(canvas);
+  if (!bg) return;
+  bg.set({
+    selectable,
+    evented: selectable,
+    hasControls: selectable,
+    hoverCursor: selectable ? 'move' : 'default',
+  });
+  canvas.renderAll();
+}
+
 function drawGrid(canvas: Canvas, gridStepMeters: number): void {
   const width = canvas.getWidth();
   const height = canvas.getHeight();
@@ -65,11 +116,7 @@ function drawGrid(canvas: Canvas, gridStepMeters: number): void {
   canvas.add(gridGroup);
   sendObjectToBottom(canvas, gridGroup);
 
-  const bg = canvas.getObjects().find((o) => {
-    if (!(o instanceof FabricImage)) return false;
-    // @ts-expect-error custom runtime property
-    return o.__gardenBackground === true;
-  }) as FabricImage | undefined;
+  const bg = findBackground(canvas);
   if (bg) {
     sendObjectToBottom(canvas, bg);
   }
@@ -91,6 +138,8 @@ export default function GardenCanvas() {
   const setScale = useGardenStore((s) => s.setScale);
   const gridStep = useGardenStore((s) => s.gridStep);
   const scale = useGardenStore((s) => s.scale);
+  const backgroundImage = useGardenStore((s) => s.backgroundImage);
+  const backgroundLocked = useGardenStore((s) => s.backgroundLocked);
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -171,6 +220,25 @@ export default function GardenCanvas() {
     if (!fabricRef.current) return;
     drawGrid(fabricRef.current, gridStep);
   }, [gridStep]);
+
+  useEffect(() => {
+    if (!fabricRef.current) return;
+    if (!backgroundImage) {
+      removeBackground(fabricRef.current);
+      fabricRef.current.renderAll();
+      return;
+    }
+    void loadBackgroundImage(fabricRef.current, backgroundImage).then(() => {
+      if (!fabricRef.current) return;
+      const locked = useGardenStore.getState().backgroundLocked;
+      setBackgroundSelectable(fabricRef.current, !locked);
+    });
+  }, [backgroundImage]);
+
+  useEffect(() => {
+    if (!fabricRef.current) return;
+    setBackgroundSelectable(fabricRef.current, !backgroundLocked);
+  }, [backgroundLocked]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-background">

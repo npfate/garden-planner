@@ -18,6 +18,7 @@ interface GardenState {
   scale: number;
   gridStep: number;
   backgroundImage: string | null;
+  backgroundLocked: boolean;
   canvas: FabricCanvas | null;
 }
 
@@ -30,6 +31,7 @@ interface GardenActions {
   setScale: (scale: number) => void;
   setGridStep: (step: number) => void;
   setBackgroundImage: (url: string | null) => void;
+  setBackgroundLocked: (locked: boolean) => void;
   setCanvas: (canvas: FabricCanvas | null) => void;
   saveToFile: () => string;
   loadFromFile: (json: string) => void;
@@ -44,6 +46,7 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   scale: 100,
   gridStep: 1,
   backgroundImage: null,
+  backgroundLocked: false,
   canvas: null,
 
   addObject: (obj: GardenObject): void => {
@@ -85,6 +88,10 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
 
   setBackgroundImage: (url: string | null): void => {
     set({ backgroundImage: url });
+  },
+
+  setBackgroundLocked: (locked: boolean): void => {
+    set({ backgroundLocked: locked });
   },
 
   setCanvas: (canvas: FabricCanvas | null): void => {
