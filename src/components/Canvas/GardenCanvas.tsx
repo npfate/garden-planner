@@ -1,9 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { Canvas, FabricImage, Line, Group } from 'fabric';
+import { Canvas, FabricImage, Line, Group, Point } from 'fabric';
+import type { TPointerEvent, TPointerEventInfo } from 'fabric';
 import { useGardenStore } from '../../store/gardenStore';
 
 const PIXELS_PER_METER = 50;
 const GRID_COLOR = '#E5E7EB';
+const ZOOM_FACTOR = 1.1;
+const MIN_SCALE = 10;
+const MAX_SCALE = 500;
 
 function sendObjectToBottom(canvas: Canvas, obj: Line | Group | FabricImage): void {
   canvas.sendObjectToBack(obj);
@@ -71,12 +75,22 @@ function drawGrid(canvas: Canvas, gridStepMeters: number): void {
   }
 }
 
+function applyZoom(canvas: Canvas, newScalePercent: number, centerPoint?: Point): void {
+  const clamped = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScalePercent));
+  const zoom = clamped / 100;
+  const point = centerPoint ?? new Point(canvas.getWidth() / 2, canvas.getHeight() / 2);
+  canvas.zoomToPoint(point, zoom);
+  canvas.renderAll();
+}
+
 export default function GardenCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const setCanvas = useGardenStore((s) => s.setCanvas);
+  const setScale = useGardenStore((s) => s.setScale);
   const gridStep = useGardenStore((s) => s.gridStep);
+  const scale = useGardenStore((s) => s.scale);
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -89,12 +103,43 @@ export default function GardenCanvas() {
       backgroundColor: '#F5F7FA',
       selection: true,
       preserveObjectStacking: true,
+      allowTouchScrolling: true,
+      fireRightClick: true,
+      stopContextMenu: true,
     });
 
     fabricRef.current = canvas;
     setCanvas(canvas);
 
     drawGrid(canvas, useGardenStore.getState().gridStep);
+
+    const onWheel = (opt: TPointerEventInfo<TPointerEvent>): void => {
+      const evt = opt.e;
+      const isWheel =
+        typeof (evt as unknown as WheelEvent).deltaY === 'number' &&
+        ((evt as unknown as WheelEvent).type === 'wheel' ||
+          (evt as unknown as WheelEvent).type === 'mousewheel');
+      if (!isWheel) return;
+      if (!evt.ctrlKey && !evt.metaKey) return;
+      evt.preventDefault();
+      evt.stopPropagation();
+
+      const wheel = evt as unknown as WheelEvent;
+      const currentScale = useGardenStore.getState().scale;
+      const factor = wheel.deltaY < 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+      const next = Math.round(currentScale * factor);
+      const clamped = Math.max(MIN_SCALE, Math.min(MAX_SCALE, next));
+      const target = (wheel.currentTarget ?? canvas.lowerCanvasEl) as HTMLElement | null;
+      const rect = target?.getBoundingClientRect();
+      const pointer = new Point(
+        rect ? wheel.clientX - rect.left : wheel.offsetX ?? 0,
+        rect ? wheel.clientY - rect.top : wheel.offsetY ?? 0,
+      );
+      applyZoom(canvas, clamped, pointer);
+      setScale(clamped);
+    };
+
+    canvas.on('mouse:wheel', onWheel);
 
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -107,6 +152,7 @@ export default function GardenCanvas() {
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      canvas.off('mouse:wheel', onWheel);
       resizeObserver.disconnect();
       if (fabricRef.current) {
         fabricRef.current.dispose();
@@ -114,7 +160,12 @@ export default function GardenCanvas() {
       }
       setCanvas(null);
     };
-  }, [setCanvas]);
+  }, [setCanvas, setScale]);
+
+  useEffect(() => {
+    if (!fabricRef.current) return;
+    applyZoom(fabricRef.current, scale);
+  }, [scale]);
 
   useEffect(() => {
     if (!fabricRef.current) return;
