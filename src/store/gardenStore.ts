@@ -16,6 +16,7 @@ interface GardenState {
   currentYear: number;
   selectedObjectId: string | null;
   scale: number;
+  gridStep: number;
   backgroundImage: string | null;
   canvas: FabricCanvas | null;
 }
@@ -27,6 +28,7 @@ interface GardenActions {
   setYear: (year: number) => void;
   selectObject: (id: string | null) => void;
   setScale: (scale: number) => void;
+  setGridStep: (step: number) => void;
   setBackgroundImage: (url: string | null) => void;
   setCanvas: (canvas: FabricCanvas | null) => void;
   saveToFile: () => string;
@@ -40,6 +42,7 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   currentYear: 2024,
   selectedObjectId: null,
   scale: 100,
+  gridStep: 1,
   backgroundImage: null,
   canvas: null,
 
@@ -74,6 +77,10 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
 
   setScale: (scale: number): void => {
     set({ scale: Math.max(10, Math.min(1000, scale)) });
+  },
+
+  setGridStep: (step: number): void => {
+    set({ gridStep: Math.max(0.1, step) });
   },
 
   setBackgroundImage: (url: string | null): void => {
