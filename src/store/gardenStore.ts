@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { Canvas as FabricCanvas } from 'fabric';
 import type { GardenObject } from '../types/garden';
 
 export interface GardenFileSnapshot {
@@ -16,6 +17,7 @@ interface GardenState {
   selectedObjectId: string | null;
   scale: number;
   backgroundImage: string | null;
+  canvas: FabricCanvas | null;
 }
 
 interface GardenActions {
@@ -26,6 +28,7 @@ interface GardenActions {
   selectObject: (id: string | null) => void;
   setScale: (scale: number) => void;
   setBackgroundImage: (url: string | null) => void;
+  setCanvas: (canvas: FabricCanvas | null) => void;
   saveToFile: () => string;
   loadFromFile: (json: string) => void;
 }
@@ -38,6 +41,7 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   selectedObjectId: null,
   scale: 100,
   backgroundImage: null,
+  canvas: null,
 
   addObject: (obj: GardenObject): void => {
     set((state) => ({
@@ -74,6 +78,10 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
 
   setBackgroundImage: (url: string | null): void => {
     set({ backgroundImage: url });
+  },
+
+  setCanvas: (canvas: FabricCanvas | null): void => {
+    set({ canvas });
   },
 
   saveToFile: (): string => {
