@@ -15,6 +15,13 @@ export interface YearHistoryEntry {
   notes?: string;
 }
 
+export interface Variety {
+  id: string;
+  name: string;
+  graftingYear?: number | null;
+  notes?: string | null;
+}
+
 export interface GardenObject {
   id: string;
   type: GardenObjectType;
@@ -26,7 +33,7 @@ export interface GardenObject {
   height: number;
   rotation?: number;
   parentId: string | null;
-  varieties: string[];
+  varieties: Variety[];
   history: Record<number, YearHistoryEntry>;
   customIcon?: string | null;
   createdAt: string;
@@ -45,7 +52,7 @@ export interface Bed extends GardenObject {
 
 export interface Seedling extends GardenObject {
   type: 'seedling';
-  variety?: string;
+  variety?: Variety | null;
   quantity?: number;
 }
 
