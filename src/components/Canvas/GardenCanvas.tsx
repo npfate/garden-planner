@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Canvas, FabricImage, Group, Line, Point, Polygon } from 'fabric';
+import { ActiveSelection, Canvas, FabricImage, Group, Line, Point, Polygon, type FabricObject } from 'fabric';
 import type { TPointerEvent, TPointerEventInfo } from 'fabric';
 import { useGardenStore, type ToolId } from '../../store/gardenStore';
 import type { GardenObject, GardenObjectType } from '../../types/garden';
@@ -200,7 +200,7 @@ export default function GardenCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
-  const activeToolRef = useRef<ToolId>('pointer');
+  const activeToolRef = useRef<ToolId>('select');
   const bedPointsRef = useRef<Point[]>([]);
 
   const setCanvas = useGardenStore((s) => s.setCanvas);
@@ -210,6 +210,7 @@ export default function GardenCanvas() {
   const activeTool = useGardenStore((s) => s.activeTool);
   const backgroundImage = useGardenStore((s) => s.backgroundImage);
   const backgroundLocked = useGardenStore((s) => s.backgroundLocked);
+  const selectObject = useGardenStore((s) => s.selectObject);
 
   useEffect(() => {
     activeToolRef.current = activeTool;
@@ -314,18 +315,36 @@ export default function GardenCanvas() {
       bedPointsRef.current = [];
     };
 
-    const handleCanvasClick = (event: TPointerEventInfo<TPointerEvent>): void => {
-      const currentTool = activeToolRef.current;
-      const target = canvas.findTarget(event.e) as { type?: string } | null;
-      if (target && target.type && target.type !== 'group') {
-        canvas.setActiveObject(target as never);
-        canvas.renderAll();
+    const syncSelectionToStore = (selection: ActiveSelection | FabricObject | null): void => {
+      if (!selection) {
+        selectObject(null);
         return;
       }
 
-      if (currentTool === 'pointer') {
+      const object = selection instanceof ActiveSelection ? selection.getObjects()[0] : selection;
+      const objectId = object?.get('gardenObjectId') ?? object?.get('objectId');
+      if (typeof objectId === 'string') {
+        selectObject(objectId);
+      } else {
+        selectObject(null);
+      }
+    };
+
+    const handleCanvasClick = (event: TPointerEventInfo<TPointerEvent>): void => {
+      const currentTool = activeToolRef.current;
+      const target = canvas.findTarget(event.e) as { type?: string } | null;
+
+      if (currentTool === 'select') {
+        if (target && target.type && target.type !== 'group') {
+          canvas.setActiveObject(target as never);
+          canvas.renderAll();
+          syncSelectionToStore(target as FabricObject);
+          return;
+        }
+
         canvas.discardActiveObject();
         canvas.renderAll();
+        selectObject(null);
         return;
       }
 
@@ -379,12 +398,35 @@ export default function GardenCanvas() {
       syncFabricObjectToStore(canvas);
     };
 
+    const syncSelectionChanged = (event: { selected?: FabricObject[] | FabricObject | null }): void => {
+      const selected = event.selected ?? null;
+      if (!selected) {
+        selectObject(null);
+        return;
+      }
+
+      const objects = Array.isArray(selected) ? selected : [selected];
+      const first = objects[0];
+      const objectId = first?.get('gardenObjectId') ?? first?.get('objectId');
+      selectObject(typeof objectId === 'string' ? objectId : null);
+    };
+
     canvas.on('mouse:wheel', onWheel);
     canvas.on('mouse:down', handleCanvasClick);
     canvas.on('mouse:dblclick', handleDoubleClick);
+    canvas.on('selection:created', (event) => syncSelectionChanged(event));
+    canvas.on('selection:updated', (event) => syncSelectionChanged(event));
+    canvas.on('selection:cleared', () => selectObject(null));
+    canvas.on('object:modified', () => {
+      syncActiveObject();
+      const activeObject = canvas.getActiveObject();
+      const objectId = activeObject?.get('gardenObjectId') ?? activeObject?.get('objectId');
+      if (typeof objectId === 'string') {
+        selectObject(objectId);
+      }
+    });
     canvas.on('object:moving', syncActiveObject);
     canvas.on('object:scaling', syncActiveObject);
-    canvas.on('object:modified', syncActiveObject);
     canvas.on('object:rotating', syncActiveObject);
 
     const resizeObserver = new ResizeObserver((entries) => {
@@ -401,9 +443,19 @@ export default function GardenCanvas() {
       canvas.off('mouse:wheel', onWheel);
       canvas.off('mouse:down', handleCanvasClick);
       canvas.off('mouse:dblclick', handleDoubleClick);
+      canvas.off('selection:created', (event) => syncSelectionChanged(event));
+      canvas.off('selection:updated', (event) => syncSelectionChanged(event));
+      canvas.off('selection:cleared', () => selectObject(null));
+      canvas.off('object:modified', () => {
+        syncActiveObject();
+        const activeObject = canvas.getActiveObject();
+        const objectId = activeObject?.get('gardenObjectId') ?? activeObject?.get('objectId');
+        if (typeof objectId === 'string') {
+          selectObject(objectId);
+        }
+      });
       canvas.off('object:moving', syncActiveObject);
       canvas.off('object:scaling', syncActiveObject);
-      canvas.off('object:modified', syncActiveObject);
       canvas.off('object:rotating', syncActiveObject);
       resizeObserver.disconnect();
       if (fabricRef.current) {

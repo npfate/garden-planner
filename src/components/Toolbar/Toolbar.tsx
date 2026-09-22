@@ -18,7 +18,7 @@ type ToolbarTool = {
 };
 
 const TOOLS: ToolbarTool[] = [
-  { id: 'pointer', label: 'Выделение', icon: MousePointer2 },
+  { id: 'select', label: 'Выделение', icon: MousePointer2 },
   { id: 'bed', label: 'Грядка', icon: Square },
 ];
 
