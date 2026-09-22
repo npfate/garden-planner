@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { ActiveSelection, Canvas, FabricImage, Group, Line, Point, Polygon, type FabricObject } from 'fabric';
-import type { TPointerEvent, TPointerEventInfo } from 'fabric';
+import { ActiveSelection, Canvas, FabricImage, Group, Line, Point, Rect } from 'fabric';
+import type { TPointerEvent, TPointerEventInfo, FabricObject } from 'fabric';
 import { useGardenStore, type ToolId } from '../../store/gardenStore';
 import type { GardenObject, GardenObjectType } from '../../types/garden';
 
@@ -180,7 +180,7 @@ function syncFabricObjectToStore(canvas: Canvas): void {
   const activeObject = canvas.getActiveObject();
   if (!activeObject) return;
 
-  const objectId = activeObject.get('objectId');
+  const objectId = activeObject.get('gardenObjectId') ?? activeObject.get('objectId');
   if (!objectId || typeof objectId !== 'string') return;
 
   const width = activeObject.getScaledWidth ? activeObject.getScaledWidth() : activeObject.width ?? 0;
@@ -196,12 +196,36 @@ function syncFabricObjectToStore(canvas: Canvas): void {
   });
 }
 
+function createBedPreview(start: Point, end: Point): Rect {
+  const left = Math.min(start.x, end.x);
+  const top = Math.min(start.y, end.y);
+  const width = Math.max(Math.abs(end.x - start.x), 1);
+  const height = Math.max(Math.abs(end.y - start.y), 1);
+
+  return new Rect({
+    left,
+    top,
+    width,
+    height,
+    fill: 'rgba(76, 175, 80, 0.2)',
+    stroke: '#4CAF50',
+    strokeWidth: 2,
+    selectable: false,
+    evented: false,
+    hasControls: false,
+    hasBorders: false,
+    objectCaching: false,
+    originX: 'left',
+    originY: 'top',
+  });
+}
+
 export default function GardenCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const activeToolRef = useRef<ToolId>('select');
-  const bedPointsRef = useRef<Point[]>([]);
+  const bedDraftRef = useRef<{ start: Point; preview: Rect | null } | null>(null);
 
   const setCanvas = useGardenStore((s) => s.setCanvas);
   const setScale = useGardenStore((s) => s.setScale);
@@ -262,57 +286,61 @@ export default function GardenCanvas() {
       setScale(clamped);
     };
 
-    const finalizeBedDraft = (): void => {
-      if (bedPointsRef.current.length < 2) {
-        bedPointsRef.current = [];
-        return;
+    const finalizeBedDraft = (point: Point): void => {
+      const draft = bedDraftRef.current;
+      if (!draft) return;
+
+      const preview = draft.preview;
+      if (preview) {
+        canvas.remove(preview);
       }
 
-      const points = bedPointsRef.current.map((point) => ({ ...point }));
-      const minX = Math.min(...points.map((point) => point.x));
-      const minY = Math.min(...points.map((point) => point.y));
-      const maxX = Math.max(...points.map((point) => point.x));
-      const maxY = Math.max(...points.map((point) => point.y));
-      const bedPoints = [
-        new Point(minX, minY),
-        new Point(maxX, minY),
-        new Point(maxX, maxY),
-        new Point(minX, maxY),
-      ];
+      const start = draft.start;
+      const left = Math.min(start.x, point.x);
+      const top = Math.min(start.y, point.y);
+      const width = Math.max(Math.abs(point.x - start.x), 1);
+      const height = Math.max(Math.abs(point.y - start.y), 1);
 
-      const polygon = new Polygon(bedPoints, {
-        fill: '#facc15',
-        stroke: '#1f2937',
-        strokeWidth: 1,
+      const rect = new Rect({
+        left,
+        top,
+        width,
+        height,
+        fill: 'rgba(76, 175, 80, 0.2)',
+        stroke: '#4CAF50',
+        strokeWidth: 2,
         selectable: true,
         evented: true,
         hasControls: true,
         hasBorders: true,
         objectCaching: false,
       });
+
       const id = crypto.randomUUID();
-      const bounds = polygon.getBoundingRect();
-      const entry = createGardenObjectEntry(
-        'bed',
-        'Грядка',
-        useGardenStore.getState().currentYear,
-        bounds.left,
-        bounds.top,
-        bounds.width,
-        bounds.height,
-      );
+      const currentYear = useGardenStore.getState().currentYear;
+      const existingBeds = useGardenStore.getState().objects.filter((item) => item.type === 'bed').length + 1;
+      const name = `Грядка ${existingBeds}`;
+
+      const entry = createGardenObjectEntry('bed', name, currentYear, left, top, width, height);
       entry.id = id;
-      polygon.set('objectId', id);
-      polygon.set('objectType', 'bed');
-      polygon.set('name', 'Грядка');
-      polygon.set('year', useGardenStore.getState().currentYear);
-      polygon.set('selectable', true);
-      polygon.set('evented', true);
-      canvas.add(polygon);
-      canvas.setActiveObject(polygon);
+
+      rect.set('gardenObjectId', id);
+      rect.set('objectType', 'bed');
+      rect.set('name', name);
+      rect.set('year', currentYear);
+      rect.set('selectable', true);
+      rect.set('evented', true);
+      rect.set('hasControls', true);
+      rect.set('hasBorders', true);
+
+      canvas.add(rect);
+      canvas.setActiveObject(rect);
       canvas.renderAll();
       useGardenStore.getState().addObject(entry);
-      bedPointsRef.current = [];
+      useGardenStore.getState().selectObject(id);
+      useGardenStore.getState().setActiveTool('select');
+      activeToolRef.current = 'select';
+      bedDraftRef.current = null;
     };
 
     const syncSelectionToStore = (selection: ActiveSelection | FabricObject | null): void => {
@@ -352,46 +380,43 @@ export default function GardenCanvas() {
         const pointer = canvas.getScenePoint(event.e);
         const snapped = getSnapPoint(pointer.x, pointer.y);
         const point = new Point(snapped.x, snapped.y);
-        bedPointsRef.current = [...bedPointsRef.current, point];
 
-        const points = bedPointsRef.current;
-        if (points.length >= 2) {
-          const minX = Math.min(...points.map((p) => p.x));
-          const minY = Math.min(...points.map((p) => p.y));
-          const maxX = Math.max(...points.map((p) => p.x));
-          const maxY = Math.max(...points.map((p) => p.y));
-          const previewPoints = [
-            new Point(minX, minY),
-            new Point(maxX, minY),
-            new Point(maxX, maxY),
-            new Point(minX, maxY),
-          ];
-
-          const previous = canvas.getObjects().find((o) => o.get('objectType') === 'bed' && o.get('name') === 'Грядка-черновик');
-          if (previous) canvas.remove(previous);
-
-          const preview = new Polygon(previewPoints, {
-            fill: '#facc15',
-            stroke: '#1f2937',
-            strokeWidth: 1,
-            selectable: false,
-            evented: false,
-            objectCaching: false,
-          });
-          preview.set('name', 'Грядка-черновик');
-          preview.set('objectType', 'bed');
+        if (!bedDraftRef.current) {
+          const preview = createBedPreview(point, point);
+          bedDraftRef.current = { start: point, preview };
           canvas.add(preview);
           canvas.renderAll();
+          return;
         }
+
+        finalizeBedDraft(point);
         return;
       }
-
     };
 
     const handleDoubleClick = (): void => {
-      if (activeToolRef.current === 'bed') {
-        finalizeBedDraft();
+      if (activeToolRef.current === 'bed' && bedDraftRef.current) {
+        const point = bedDraftRef.current.start;
+        finalizeBedDraft(point);
       }
+    };
+
+    const handleBedMouseMove = (event: TPointerEventInfo<TPointerEvent>): void => {
+      if (activeToolRef.current !== 'bed' || !bedDraftRef.current) return;
+
+      const pointer = canvas.getScenePoint(event.e);
+      const snapped = getSnapPoint(pointer.x, pointer.y);
+      const nextPoint = new Point(snapped.x, snapped.y);
+      const draft = bedDraftRef.current;
+      const nextPreview = createBedPreview(draft.start, nextPoint);
+
+      if (draft.preview) {
+        canvas.remove(draft.preview);
+      }
+
+      draft.preview = nextPreview;
+      canvas.add(nextPreview);
+      canvas.renderAll();
     };
 
     const syncActiveObject = (): void => {
@@ -413,6 +438,7 @@ export default function GardenCanvas() {
 
     canvas.on('mouse:wheel', onWheel);
     canvas.on('mouse:down', handleCanvasClick);
+    canvas.on('mouse:move', handleBedMouseMove);
     canvas.on('mouse:dblclick', handleDoubleClick);
     canvas.on('selection:created', (event) => syncSelectionChanged(event));
     canvas.on('selection:updated', (event) => syncSelectionChanged(event));
@@ -442,6 +468,7 @@ export default function GardenCanvas() {
     return () => {
       canvas.off('mouse:wheel', onWheel);
       canvas.off('mouse:down', handleCanvasClick);
+      canvas.off('mouse:move', handleBedMouseMove);
       canvas.off('mouse:dblclick', handleDoubleClick);
       canvas.off('selection:created', (event) => syncSelectionChanged(event));
       canvas.off('selection:updated', (event) => syncSelectionChanged(event));
@@ -475,6 +502,54 @@ export default function GardenCanvas() {
     if (!fabricRef.current) return;
     drawGrid(fabricRef.current, gridStep);
   }, [gridStep]);
+
+  useEffect(() => {
+    if (!fabricRef.current) return;
+
+    const canvas = fabricRef.current;
+    const bedMode = activeTool === 'bed';
+
+    canvas.selection = !bedMode;
+    canvas.defaultCursor = bedMode ? 'crosshair' : 'default';
+    canvas.hoverCursor = bedMode ? 'crosshair' : 'move';
+
+    canvas.forEachObject((obj) => {
+      const isSelectable = !bedMode;
+      obj.set({
+        selectable: isSelectable,
+        evented: isSelectable,
+        hasControls: isSelectable,
+        hasBorders: isSelectable,
+      });
+    });
+
+    if (bedMode) {
+      canvas.discardActiveObject();
+      useGardenStore.getState().selectObject(null);
+    }
+
+    canvas.renderAll();
+  }, [activeTool]);
+
+  useEffect(() => {
+    if (!fabricRef.current) return;
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || activeToolRef.current !== 'bed' || !bedDraftRef.current) {
+        return;
+      }
+
+      const preview = bedDraftRef.current.preview;
+      if (preview) {
+        fabricRef.current?.remove(preview);
+      }
+      bedDraftRef.current = null;
+      fabricRef.current?.renderAll();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTool]);
 
   useEffect(() => {
     if (!fabricRef.current) return;
