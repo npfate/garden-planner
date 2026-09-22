@@ -1,20 +1,20 @@
 import { useRef } from 'react';
 import {
   MousePointer2,
-  Square,
-  Circle,
+  Hexagon,
   Type,
-  Trash2,
+  Eraser,
+  TreePine,
+  Drum,
+  Droplets,
+  House,
+  Warehouse,
   ZoomIn,
   ZoomOut,
   Image as ImageIcon,
   Lock,
   Unlock,
-  PencilRuler,
   Grid3X3,
-  Droplets,
-  House,
-  Leaf,
 } from 'lucide-react';
 import { useGardenStore, type ToolId } from '../../store/gardenStore';
 
@@ -26,14 +26,14 @@ type ToolbarTool = {
 
 const TOOLS: ToolbarTool[] = [
   { id: 'pointer', label: 'Указатель', icon: MousePointer2 },
-  { id: 'polygon', label: 'Полигон', icon: PencilRuler },
+  { id: 'polygon', label: 'Полигон', icon: Hexagon },
   { id: 'text', label: 'Текст', icon: Type },
-  { id: 'eraser', label: 'Ластик', icon: Trash2 },
-  { id: 'tree', label: 'Добавить дерево', icon: Square },
-  { id: 'barrel', label: 'Бочка', icon: Circle },
+  { id: 'eraser', label: 'Ластик', icon: Eraser },
+  { id: 'tree', label: 'Дерево', icon: TreePine },
+  { id: 'barrel', label: 'Бочка', icon: Drum },
   { id: 'well', label: 'Колодец', icon: Droplets },
-  { id: 'greenhouse', label: 'Теплица', icon: Leaf },
-  { id: 'shed', label: 'Сарай', icon: House },
+  { id: 'greenhouse', label: 'Теплица', icon: House },
+  { id: 'shed', label: 'Сарай', icon: Warehouse },
 ];
 
 function fileToBase64(file: File): Promise<string> {
