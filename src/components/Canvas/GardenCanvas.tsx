@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Canvas, FabricImage, Group, Line, Point, Polygon, Rect } from 'fabric';
+import { Canvas, FabricImage, Group, Line, Point, Polygon } from 'fabric';
 import type { TPointerEvent, TPointerEventInfo } from 'fabric';
 import { useGardenStore, type ToolId } from '../../store/gardenStore';
 import type { GardenObject, GardenObjectType } from '../../types/garden';
@@ -10,29 +10,6 @@ const ZOOM_FACTOR = 1.1;
 const MIN_SCALE = 10;
 const MAX_SCALE = 500;
 const MARKER_SIZE = 10;
-
-type ShapeDraft = {
-  tool: 'polygon' | 'greenhouse' | 'shed';
-  start: Point;
-  preview: Polygon | Rect | null;
-};
-
-const OBJECT_COLORS: Record<GardenObjectType | ToolId, string> = {
-  tree: '#22c55e',
-  bed: '#facc15',
-  seedling: '#84cc16',
-  greenhouse: '#14b8a6',
-  building: '#8b5cf6',
-  path: '#a3a3a3',
-  custom: '#3b82f6',
-  pointer: '#1f2937',
-  polygon: '#f59e0b',
-  text: '#64748b',
-  eraser: '#ef4444',
-  barrel: '#f59e0b',
-  well: '#2563eb',
-  shed: '#8b5cf6',
-};
 
 function sendObjectToBottom(canvas: Canvas, obj: Line | Group | FabricImage): void {
   canvas.sendObjectToBack(obj);
@@ -95,52 +72,6 @@ function createGardenObjectEntry(
     createdAt: now,
     updatedAt: now,
   };
-}
-
-function createMarker(tool: ToolId | GardenObjectType, x: number, y: number): Rect {
-  const color = OBJECT_COLORS[tool] ?? '#3b82f6';
-
-  const rect = new Rect({
-    left: x,
-    top: y,
-    width: MARKER_SIZE,
-    height: MARKER_SIZE,
-    fill: color,
-    stroke: '#1f2937',
-    strokeWidth: 1,
-    originX: 'center',
-    originY: 'center',
-    selectable: true,
-    evented: true,
-    hasControls: true,
-    hasBorders: true,
-  });
-
-  rect.set('objectType', tool);
-  rect.set('objectId', crypto.randomUUID());
-  return rect;
-}
-
-function createRectShape(start: Point, end: Point, fill: string): Rect {
-  const left = Math.min(start.x, end.x);
-  const top = Math.min(start.y, end.y);
-  const width = Math.max(Math.abs(end.x - start.x), 10);
-  const height = Math.max(Math.abs(end.y - start.y), 10);
-
-  return new Rect({
-    left,
-    top,
-    width,
-    height,
-    fill,
-    stroke: '#1f2937',
-    strokeWidth: 1,
-    selectable: true,
-    evented: true,
-    hasControls: true,
-    hasBorders: true,
-    objectCaching: false,
-  });
 }
 
 export async function loadBackgroundImage(canvas: Canvas, url: string): Promise<void> {
@@ -270,9 +201,7 @@ export default function GardenCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const activeToolRef = useRef<ToolId>('pointer');
-  const shapeDraftRef = useRef<ShapeDraft | null>(null);
   const bedPointsRef = useRef<Point[]>([]);
-  const polygonPointsRef = useRef<Point[]>([]);
 
   const setCanvas = useGardenStore((s) => s.setCanvas);
   const setScale = useGardenStore((s) => s.setScale);
@@ -332,39 +261,6 @@ export default function GardenCanvas() {
       setScale(clamped);
     };
 
-    const finalizeDraftShape = (): void => {
-      if (!shapeDraftRef.current) return;
-      const draft = shapeDraftRef.current;
-      const preview = draft.preview;
-      if (!preview) {
-        shapeDraftRef.current = null;
-        return;
-      }
-
-      const id = crypto.randomUUID();
-      const currentYear = useGardenStore.getState().currentYear;
-      const name = draft.tool === 'greenhouse' ? 'Теплица' : 'Сарай';
-      const type = draft.tool === 'greenhouse' ? 'greenhouse' : 'building';
-      const entry = createGardenObjectEntry(
-        type,
-        name,
-        currentYear,
-        preview.left ?? 0,
-        preview.top ?? 0,
-        preview.width ?? 0,
-        preview.height ?? 0,
-      );
-      entry.id = id;
-      preview.set('objectId', id);
-      preview.set('objectType', type);
-      preview.set('name', name);
-      preview.set('year', currentYear);
-      canvas.setActiveObject(preview);
-      canvas.renderAll();
-      useGardenStore.getState().addObject(entry);
-      shapeDraftRef.current = null;
-    };
-
     const finalizeBedDraft = (): void => {
       if (bedPointsRef.current.length < 2) {
         bedPointsRef.current = [];
@@ -418,80 +314,6 @@ export default function GardenCanvas() {
       bedPointsRef.current = [];
     };
 
-    const finalizePolygonDraft = (): void => {
-      if (polygonPointsRef.current.length < 3) {
-        polygonPointsRef.current = [];
-        return;
-      }
-
-      const points = [...polygonPointsRef.current];
-      const polygon = new Polygon(points, {
-        fill: '#facc15',
-        stroke: '#1f2937',
-        strokeWidth: 1,
-        selectable: true,
-        evented: true,
-        hasControls: true,
-        hasBorders: true,
-        objectCaching: false,
-      });
-      const id = crypto.randomUUID();
-      const bounds = polygon.getBoundingRect();
-      const entry = createGardenObjectEntry(
-        'bed',
-        'Грядка',
-        useGardenStore.getState().currentYear,
-        bounds.left,
-        bounds.top,
-        bounds.width,
-        bounds.height,
-      );
-      entry.id = id;
-      polygon.set('objectId', id);
-      polygon.set('objectType', 'bed');
-      polygon.set('name', 'Грядка');
-      polygon.set('year', useGardenStore.getState().currentYear);
-      polygon.set('selectable', true);
-      polygon.set('evented', true);
-      canvas.add(polygon);
-      canvas.setActiveObject(polygon);
-      canvas.renderAll();
-      useGardenStore.getState().addObject(entry);
-      polygonPointsRef.current = [];
-    };
-
-    const startShapeDraft = (event: TPointerEventInfo<TPointerEvent>): void => {
-      const currentTool = activeToolRef.current;
-      if (currentTool !== 'greenhouse' && currentTool !== 'shed') return;
-
-      const pointer = canvas.getScenePoint(event.e);
-      const snappedStart = getSnapPoint(pointer.x, pointer.y);
-      const start = new Point(snappedStart.x, snappedStart.y);
-
-      const tool = currentTool === 'greenhouse' ? 'greenhouse' : 'shed';
-      const preview = createRectShape(start, start, OBJECT_COLORS[tool]);
-      shapeDraftRef.current = { tool, start, preview };
-      canvas.add(preview);
-      canvas.renderAll();
-    };
-
-    const updateShapeDraft = (event: TPointerEventInfo<TPointerEvent>): void => {
-      const draft = shapeDraftRef.current;
-      if (!draft) return;
-
-      const point = canvas.getScenePoint(event.e);
-      const snapped = getSnapPoint(point.x, point.y);
-      const end = new Point(snapped.x, snapped.y);
-      const preview = draft.preview;
-      if (!preview) return;
-
-      const next = createRectShape(draft.start, end, OBJECT_COLORS[draft.tool]);
-      canvas.remove(preview);
-      canvas.add(next);
-      draft.preview = next;
-      canvas.renderAll();
-    };
-
     const handleCanvasClick = (event: TPointerEventInfo<TPointerEvent>): void => {
       const currentTool = activeToolRef.current;
       const target = canvas.findTarget(event.e) as { type?: string } | null;
@@ -501,7 +323,7 @@ export default function GardenCanvas() {
         return;
       }
 
-      if (currentTool === 'pointer' || currentTool === 'eraser') {
+      if (currentTool === 'pointer') {
         canvas.discardActiveObject();
         canvas.renderAll();
         return;
@@ -545,108 +367,11 @@ export default function GardenCanvas() {
         return;
       }
 
-      if (currentTool === 'polygon') {
-        const pointer = canvas.getScenePoint(event.e);
-        const snapped = getSnapPoint(pointer.x, pointer.y);
-        const point = new Point(snapped.x, snapped.y);
-
-        if (polygonPointsRef.current.length === 0) {
-          polygonPointsRef.current = [point];
-        } else if (polygonPointsRef.current.length >= 3) {
-          polygonPointsRef.current = [...polygonPointsRef.current, point];
-        } else {
-          polygonPointsRef.current = [...polygonPointsRef.current, point];
-        }
-
-        const previewPoints = [...polygonPointsRef.current];
-        if (previewPoints.length >= 3) {
-          const preview = new Polygon(previewPoints, {
-            fill: '#facc15',
-            stroke: '#1f2937',
-            strokeWidth: 1,
-            selectable: false,
-            evented: false,
-            objectCaching: false,
-          });
-          if (previewPoints.length > 3) {
-            const previous = canvas.getObjects().find((o) => o.get('objectType') === 'bed' && o.get('name') === 'Грядка-черновик');
-            if (previous) canvas.remove(previous);
-          }
-          preview.set('name', 'Грядка-черновик');
-          preview.set('objectType', 'bed');
-          canvas.add(preview);
-          canvas.renderAll();
-        }
-        return;
-      }
-
-      if (currentTool === 'greenhouse' || currentTool === 'shed') {
-        startShapeDraft(event);
-        return;
-      }
-
-      const pointer = canvas.getScenePoint(event.e);
-      const snapped = getSnapPoint(pointer.x, pointer.y);
-
-      if (currentTool === 'tree') {
-        const treeObject = createMarker('tree', snapped.x, snapped.y);
-        const objectEntry = createGardenObjectEntry(
-          'tree',
-          'Яблоня',
-          useGardenStore.getState().currentYear,
-          snapped.x,
-          snapped.y,
-        );
-        treeObject.set('objectId', objectEntry.id);
-        canvas.add(treeObject);
-        canvas.setActiveObject(treeObject);
-        canvas.renderAll();
-        useGardenStore.getState().addObject(objectEntry);
-        return;
-      }
-
-      if (currentTool === 'text') {
-        const textObject = createMarker('text', snapped.x, snapped.y);
-        const objectEntry = createGardenObjectEntry(
-          'custom',
-          'Текст',
-          useGardenStore.getState().currentYear,
-          snapped.x,
-          snapped.y,
-        );
-        textObject.set('objectId', objectEntry.id);
-        canvas.add(textObject);
-        canvas.setActiveObject(textObject);
-        canvas.renderAll();
-        useGardenStore.getState().addObject(objectEntry);
-        return;
-      }
-
-      if (currentTool === 'barrel' || currentTool === 'well') {
-        const tool = currentTool === 'barrel' ? 'barrel' : 'well';
-        const object = createMarker(tool, snapped.x, snapped.y);
-        const objectEntry = createGardenObjectEntry(
-          'custom',
-          tool === 'barrel' ? 'Бочка' : 'Колодец',
-          useGardenStore.getState().currentYear,
-          snapped.x,
-          snapped.y,
-        );
-        object.set('objectId', objectEntry.id);
-        canvas.add(object);
-        canvas.setActiveObject(object);
-        canvas.renderAll();
-        useGardenStore.getState().addObject(objectEntry);
-      }
     };
 
     const handleDoubleClick = (): void => {
       if (activeToolRef.current === 'bed') {
         finalizeBedDraft();
-      }
-
-      if (activeToolRef.current === 'polygon') {
-        finalizePolygonDraft();
       }
     };
 
@@ -656,8 +381,6 @@ export default function GardenCanvas() {
 
     canvas.on('mouse:wheel', onWheel);
     canvas.on('mouse:down', handleCanvasClick);
-    canvas.on('mouse:move', updateShapeDraft);
-    canvas.on('mouse:up', finalizeDraftShape);
     canvas.on('mouse:dblclick', handleDoubleClick);
     canvas.on('object:moving', syncActiveObject);
     canvas.on('object:scaling', syncActiveObject);
@@ -677,8 +400,6 @@ export default function GardenCanvas() {
     return () => {
       canvas.off('mouse:wheel', onWheel);
       canvas.off('mouse:down', handleCanvasClick);
-      canvas.off('mouse:move', updateShapeDraft);
-      canvas.off('mouse:up', finalizeDraftShape);
       canvas.off('mouse:dblclick', handleDoubleClick);
       canvas.off('object:moving', syncActiveObject);
       canvas.off('object:scaling', syncActiveObject);

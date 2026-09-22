@@ -2,17 +2,7 @@ import { create } from 'zustand';
 import type { Canvas as FabricCanvas } from 'fabric';
 import type { GardenObject } from '../types/garden';
 
-export type ToolId =
-  | 'pointer'
-  | 'bed'
-  | 'polygon'
-  | 'tree'
-  | 'text'
-  | 'eraser'
-  | 'barrel'
-  | 'well'
-  | 'greenhouse'
-  | 'shed';
+export type ToolId = 'pointer' | 'bed';
 
 export interface GardenFileSnapshot {
   version: number;
@@ -155,7 +145,7 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       const scale: number = typeof p.scale === 'number' ? p.scale : 100;
       const snapToGrid: boolean = typeof p.snapToGrid === 'boolean' ? p.snapToGrid : false;
       const activeTool: ToolId =
-        typeof p.activeTool === 'string' && ['pointer', 'bed', 'polygon', 'tree', 'text', 'eraser', 'barrel', 'well', 'greenhouse', 'shed'].includes(p.activeTool)
+        typeof p.activeTool === 'string' && ['pointer', 'bed'].includes(p.activeTool)
           ? (p.activeTool as ToolId)
           : 'pointer';
       set({ objects, backgroundImage, currentYear, scale, snapToGrid, activeTool, selectedObjectId: null });
