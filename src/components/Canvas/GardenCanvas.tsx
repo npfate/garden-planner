@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Canvas, FabricImage, Group, IText, Line, Point, Polygon, Text } from 'fabric';
+import { useEffect, useRef } from 'react';
+import { Canvas, FabricImage, Group, Line, Point, Rect } from 'fabric';
 import type { TPointerEvent, TPointerEventInfo } from 'fabric';
 import { useGardenStore, type ToolId } from '../../store/gardenStore';
 import type { GardenObject, GardenObjectType } from '../../types/garden';
@@ -9,22 +9,23 @@ const GRID_COLOR = '#E5E7EB';
 const ZOOM_FACTOR = 1.1;
 const MIN_SCALE = 10;
 const MAX_SCALE = 500;
+const MARKER_SIZE = 10;
 
-type TreeDialogState = {
-  visible: boolean;
-  x: number;
-  y: number;
-  name: string;
-  variety: string;
-  year: number;
-  harvest: number;
-};
-
-const QUICK_OBJECTS: Record<Exclude<ToolId, 'pointer' | 'polygon' | 'tree' | 'text' | 'eraser'>, { label: string; icon: string; type: GardenObjectType }> = {
-  barrel: { label: 'Бочка', icon: '🛢️', type: 'custom' },
-  well: { label: 'Колодец', icon: '⛲', type: 'custom' },
-  greenhouse: { label: 'Теплица', icon: '🪴', type: 'custom' },
-  shed: { label: 'Сарай', icon: '🧰', type: 'custom' },
+const OBJECT_COLORS: Record<GardenObjectType | ToolId, string> = {
+  tree: '#22c55e',
+  bed: '#facc15',
+  seedling: '#84cc16',
+  greenhouse: '#14b8a6',
+  building: '#8b5cf6',
+  path: '#a3a3a3',
+  custom: '#3b82f6',
+  pointer: '#1f2937',
+  polygon: '#f59e0b',
+  text: '#64748b',
+  eraser: '#ef4444',
+  barrel: '#f59e0b',
+  well: '#2563eb',
+  shed: '#8b5cf6',
 };
 
 function sendObjectToBottom(canvas: Canvas, obj: Line | Group | FabricImage): void {
@@ -50,7 +51,7 @@ function getSnapPoint(x: number, y: number): { x: number; y: number } {
   const scale = useGardenStore.getState().scale;
   if (!useGardenStore.getState().snapToGrid) return { x, y };
 
-  const effectiveStep = Math.max(1, (grid * PIXELS_PER_METER * (scale / 100)) / 1);
+  const effectiveStep = Math.max(1, grid * PIXELS_PER_METER * (scale / 100));
   return {
     x: Math.round(x / effectiveStep) * effectiveStep,
     y: Math.round(y / effectiveStep) * effectiveStep,
@@ -63,16 +64,13 @@ function createGardenObjectEntry(
   year: number,
   x: number,
   y: number,
-  width: number,
-  height: number,
+  width = MARKER_SIZE,
+  height = MARKER_SIZE,
   customIcon?: string | null,
-  attachedTo?: string | null,
 ): GardenObject {
-  const id = crypto.randomUUID();
   const now = new Date().toISOString();
-
   return {
-    id,
+    id: crypto.randomUUID(),
     type,
     name,
     year,
@@ -80,7 +78,7 @@ function createGardenObjectEntry(
     y,
     width,
     height,
-    parentId: attachedTo ?? null,
+    parentId: null,
     varieties: [],
     history: {
       [year]: {
@@ -93,25 +91,28 @@ function createGardenObjectEntry(
   };
 }
 
-function attachTextToObject(canvas: Canvas, text: IText, objectId: string): void {
-  text.set('attachedTo', objectId);
-  text.set('attachOffset', { x: 0, y: -40 });
-  canvas.on('object:moving', (event) => {
-    const target = event.target;
-    if (!target || !('objectId' in target)) return;
+function createMarker(tool: ToolId | GardenObjectType, x: number, y: number): Rect {
+  const color = OBJECT_COLORS[tool] ?? '#3b82f6';
 
-    const targetObjectId = target.get('objectId') as string | undefined;
-    if (!targetObjectId) return;
-
-    const textObjects = canvas.getObjects().filter((obj) => obj.get('attachedTo') === targetObjectId);
-    textObjects.forEach((obj) => {
-      const offset = (obj.get('attachOffset') as { x: number; y: number }) ?? { x: 0, y: -40 };
-      obj.set({
-        left: (target.left ?? 0) + offset.x,
-        top: (target.top ?? 0) + offset.y,
-      });
-    });
+  const rect = new Rect({
+    left: x,
+    top: y,
+    width: MARKER_SIZE,
+    height: MARKER_SIZE,
+    fill: color,
+    stroke: '#1f2937',
+    strokeWidth: 1,
+    originX: 'center',
+    originY: 'center',
+    selectable: true,
+    evented: true,
+    hasControls: true,
+    hasBorders: true,
   });
+
+  rect.set('objectType', tool);
+  rect.set('objectId', crypto.randomUUID());
+  return rect;
 }
 
 export async function loadBackgroundImage(canvas: Canvas, url: string): Promise<void> {
@@ -221,9 +222,7 @@ export default function GardenCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
-  const draftPolygonRef = useRef<Polygon | null>(null);
-  const draftPolygonPointsRef = useRef<Point[]>([]);
-  const [treeDialog, setTreeDialog] = useState<TreeDialogState | null>(null);
+  const activeToolRef = useRef<ToolId>('pointer');
 
   const setCanvas = useGardenStore((s) => s.setCanvas);
   const setScale = useGardenStore((s) => s.setScale);
@@ -233,175 +232,9 @@ export default function GardenCanvas() {
   const backgroundImage = useGardenStore((s) => s.backgroundImage);
   const backgroundLocked = useGardenStore((s) => s.backgroundLocked);
 
-  const finalizePolygon = (): void => {
-    const canvas = fabricRef.current;
-    if (!canvas || draftPolygonPointsRef.current.length < 3) return;
-
-    const points = [...draftPolygonPointsRef.current];
-    const polygon = new Polygon(points, {
-      fill: '#BFE7C1',
-      stroke: '#2F7D4D',
-      strokeWidth: 2,
-      selectable: true,
-      evented: true,
-      objectCaching: false,
-      opacity: 0.9,
-    });
-
-    const id = crypto.randomUUID();
-    const entry = createGardenObjectEntry('bed', 'Грядка', useGardenStore.getState().currentYear, 0, 0, 0, 0);
-    entry.id = id;
-    entry.width = 120;
-    entry.height = 120;
-    polygon.set({
-      objectId: id,
-      objectType: 'bed',
-      name: 'Грядка',
-      year: useGardenStore.getState().currentYear,
-      hasControls: true,
-      hasBorders: true,
-      cornerStyle: 'circle',
-      borderColor: '#2F7D4D',
-      cornerColor: '#2F7D4D',
-    });
-
-    canvas.add(polygon);
-    canvas.setActiveObject(polygon);
-    canvas.renderAll();
-    useGardenStore.getState().addObject(entry);
-
-    draftPolygonPointsRef.current = [];
-    if (draftPolygonRef.current) {
-      canvas.remove(draftPolygonRef.current);
-      draftPolygonRef.current = null;
-    }
-  };
-
-  const createQuickObject = (tool: Exclude<ToolId, 'pointer' | 'polygon' | 'tree' | 'text' | 'eraser'>, x: number, y: number): void => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
-
-    const config = QUICK_OBJECTS[tool];
-    const id = crypto.randomUUID();
-    const text = new Text(config.icon, {
-      left: x,
-      top: y,
-      fontSize: 32,
-      originX: 'center',
-      originY: 'center',
-      selectable: true,
-      evented: true,
-    });
-
-    const object = createGardenObjectEntry(config.type, config.label, useGardenStore.getState().currentYear, x, y, 80, 80, config.icon);
-    object.id = id;
-    text.set({
-      objectId: id,
-      objectType: config.type,
-      name: config.label,
-      year: useGardenStore.getState().currentYear,
-      customIcon: config.icon,
-      hasControls: true,
-      hasBorders: true,
-    });
-
-    canvas.add(text);
-    canvas.setActiveObject(text);
-    canvas.renderAll();
-    useGardenStore.getState().addObject(object);
-  };
-
-  const createTextObject = (x: number, y: number): void => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
-
-    const activeObject = canvas.getActiveObject();
-    const attachedTo = activeObject && 'objectId' in activeObject ? String(activeObject.get('objectId') ?? '') : null;
-    const label = attachedTo ? 'Подпись' : 'Текст';
-    const text = new IText(label, {
-      left: x,
-      top: y,
-      fontSize: 18,
-      fill: '#1F2937',
-      originX: 'center',
-      originY: 'center',
-      padding: 8,
-      borderColor: '#3B82F6',
-      cornerColor: '#3B82F6',
-      hasControls: true,
-      evented: true,
-      selectable: true,
-    });
-
-    const object = createGardenObjectEntry('custom', label, useGardenStore.getState().currentYear, x, y, 100, 32, 'T');
-    object.parentId = attachedTo;
-    const textId = object.id;
-
-    text.set({
-      objectId: textId,
-      objectType: 'custom',
-      name: label,
-      year: useGardenStore.getState().currentYear,
-      attachedTo,
-    });
-
-    if (attachedTo) {
-      attachTextToObject(canvas, text, attachedTo);
-    }
-
-    canvas.add(text);
-    canvas.setActiveObject(text);
-    canvas.renderAll();
-    useGardenStore.getState().addObject(object);
-  };
-
-  const createTreeObject = (payload: TreeDialogState): void => {
-    const canvas = fabricRef.current;
-    if (!canvas) return;
-
-    const icon = new Text('🌳', {
-      left: payload.x,
-      top: payload.y,
-      fontSize: 32,
-      originX: 'center',
-      originY: 'center',
-      selectable: true,
-      evented: true,
-    });
-
-    const id = crypto.randomUUID();
-    const entry = createGardenObjectEntry('tree', payload.name, payload.year, payload.x, payload.y, 80, 80, '🌳');
-    entry.id = id;
-    entry.varieties = [
-      {
-        id: crypto.randomUUID(),
-        name: payload.variety,
-        notes: `Сорт добавлен в ${payload.year}`,
-      },
-    ];
-    if (payload.harvest > 0) {
-      entry.history[payload.year] = {
-        harvest: payload.harvest,
-      };
-    }
-
-    icon.set({
-      objectId: id,
-      objectType: 'tree',
-      name: payload.name,
-      year: payload.year,
-      customIcon: '🌳',
-      hasControls: true,
-      hasBorders: true,
-      borderColor: '#2F7D4D',
-      cornerColor: '#2F7D4D',
-    });
-
-    canvas.add(icon);
-    canvas.setActiveObject(icon);
-    canvas.renderAll();
-    useGardenStore.getState().addObject(entry);
-  };
+  useEffect(() => {
+    activeToolRef.current = activeTool;
+  }, [activeTool]);
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -421,7 +254,6 @@ export default function GardenCanvas() {
 
     fabricRef.current = canvas;
     setCanvas(canvas);
-
     drawGrid(canvas, useGardenStore.getState().gridStep);
 
     const onWheel = (opt: TPointerEventInfo<TPointerEvent>): void => {
@@ -451,72 +283,83 @@ export default function GardenCanvas() {
     };
 
     const handleCanvasClick = (event: TPointerEventInfo<TPointerEvent>): void => {
-      if (activeTool === 'pointer' || activeTool === 'eraser') return;
-      if (activeTool === 'polygon') {
-        const pointer = canvas.getScenePoint(event.e);
-        const snapped = getSnapPoint(pointer.x, pointer.y);
-        const point = new Point(snapped.x, snapped.y);
-        draftPolygonPointsRef.current = [...draftPolygonPointsRef.current, point];
+      const currentTool = activeToolRef.current;
+      const pointer = canvas.getScenePoint(event.e);
+      const snapped = getSnapPoint(pointer.x, pointer.y);
+      const target = canvas.findTarget(event.e) as { type?: string } | null;
 
-        if (draftPolygonRef.current) {
-          canvas.remove(draftPolygonRef.current);
-        }
-
-        if (draftPolygonPointsRef.current.length >= 3) {
-          const preview = new Polygon(draftPolygonPointsRef.current, {
-            fill: '#BFE7C1',
-            stroke: '#2F7D4D',
-            strokeWidth: 2,
-            selectable: false,
-            evented: false,
-            objectCaching: false,
-            opacity: 0.8,
-          });
-          draftPolygonRef.current = preview;
-          canvas.add(preview);
-          canvas.renderAll();
-        }
+      if (target && target.type && target.type !== 'group') {
+        canvas.setActiveObject(target as never);
+        canvas.renderAll();
         return;
       }
 
-      if (activeTool === 'tree') {
-        const pointer = canvas.getScenePoint(event.e);
-        const snapped = getSnapPoint(pointer.x, pointer.y);
-        setTreeDialog({
-          visible: true,
-          x: snapped.x,
-          y: snapped.y,
-          name: 'Яблоня',
-          variety: 'Гала',
-          year: useGardenStore.getState().currentYear,
-          harvest: 0,
+      if (currentTool === 'pointer' || currentTool === 'eraser') {
+        canvas.discardActiveObject();
+        canvas.renderAll();
+        return;
+      }
+
+      if (currentTool === 'polygon') {
+        const object = createMarker('polygon', snapped.x, snapped.y);
+        canvas.add(object);
+        canvas.setActiveObject(object);
+        canvas.renderAll();
+        useGardenStore.getState().addObject({
+          ...createGardenObjectEntry('bed', 'Грядка', useGardenStore.getState().currentYear, snapped.x, snapped.y),
+          id: String(object.get('objectId')),
         });
         return;
       }
 
-      if (activeTool === 'text') {
-        const pointer = canvas.getScenePoint(event.e);
-        const snapped = getSnapPoint(pointer.x, pointer.y);
-        createTextObject(snapped.x, snapped.y);
+      if (currentTool === 'tree') {
+        const treeObject = createMarker('tree', snapped.x, snapped.y);
+        const objectEntry = createGardenObjectEntry(
+          'tree',
+          'Яблоня',
+          useGardenStore.getState().currentYear,
+          snapped.x,
+          snapped.y,
+        );
+        treeObject.set('objectId', objectEntry.id);
+        canvas.add(treeObject);
+        canvas.setActiveObject(treeObject);
+        canvas.renderAll();
+        useGardenStore.getState().addObject(objectEntry);
         return;
       }
 
-      if (activeTool === 'barrel' || activeTool === 'well' || activeTool === 'greenhouse' || activeTool === 'shed') {
-        const pointer = canvas.getScenePoint(event.e);
-        const snapped = getSnapPoint(pointer.x, pointer.y);
-        createQuickObject(activeTool, snapped.x, snapped.y);
+      if (currentTool === 'text') {
+        const textObject = createMarker('text', snapped.x, snapped.y);
+        const objectEntry = createGardenObjectEntry(
+          'custom',
+          'Текст',
+          useGardenStore.getState().currentYear,
+          snapped.x,
+          snapped.y,
+        );
+        textObject.set('objectId', objectEntry.id);
+        canvas.add(textObject);
+        canvas.setActiveObject(textObject);
+        canvas.renderAll();
+        useGardenStore.getState().addObject(objectEntry);
+        return;
       }
-    };
 
-    const handleDoubleClick = (): void => {
-      if (activeTool === 'polygon') {
-        finalizePolygon();
+      if (currentTool === 'barrel' || currentTool === 'well' || currentTool === 'greenhouse' || currentTool === 'shed') {
+        const kind = currentTool === 'barrel' ? 'custom' : currentTool === 'well' ? 'custom' : currentTool === 'greenhouse' ? 'greenhouse' : 'building';
+        const object = createMarker(currentTool, snapped.x, snapped.y);
+        const objectEntry = createGardenObjectEntry(kind, currentTool, useGardenStore.getState().currentYear, snapped.x, snapped.y);
+        object.set('objectId', objectEntry.id);
+        canvas.add(object);
+        canvas.setActiveObject(object);
+        canvas.renderAll();
+        useGardenStore.getState().addObject(objectEntry);
       }
     };
 
     canvas.on('mouse:wheel', onWheel);
     canvas.on('mouse:down', handleCanvasClick);
-    canvas.on('mouse:dblclick', handleDoubleClick);
 
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -531,7 +374,6 @@ export default function GardenCanvas() {
     return () => {
       canvas.off('mouse:wheel', onWheel);
       canvas.off('mouse:down', handleCanvasClick);
-      canvas.off('mouse:dblclick', handleDoubleClick);
       resizeObserver.disconnect();
       if (fabricRef.current) {
         fabricRef.current.dispose();
@@ -539,7 +381,7 @@ export default function GardenCanvas() {
       }
       setCanvas(null);
     };
-  }, [activeTool, setCanvas, setScale]);
+  }, [setCanvas, setScale]);
 
   useEffect(() => {
     if (!fabricRef.current) return;
@@ -570,90 +412,5 @@ export default function GardenCanvas() {
     setBackgroundSelectable(fabricRef.current, !backgroundLocked);
   }, [backgroundLocked]);
 
-  return (
-    <div ref={containerRef} className="relative w-full h-full bg-background">
-      <canvas ref={canvasRef} />
-
-      {treeDialog?.visible && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-neutral-900/20 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-white p-4 shadow-panel">
-            <h3 className="mb-3 text-lg font-semibold text-text-primary">Добавить дерево</h3>
-            <div className="space-y-3">
-              <label className="block text-sm text-text-secondary">
-                Название
-                <input
-                  className="mt-1 w-full rounded-md border border-border px-2 py-2 text-sm"
-                  value={treeDialog.name}
-                  onChange={(event) =>
-                    setTreeDialog((current) => (current ? { ...current, name: event.target.value } : current))
-                  }
-                />
-              </label>
-
-              <label className="block text-sm text-text-secondary">
-                Сорт
-                <input
-                  className="mt-1 w-full rounded-md border border-border px-2 py-2 text-sm"
-                  value={treeDialog.variety}
-                  onChange={(event) =>
-                    setTreeDialog((current) => (current ? { ...current, variety: event.target.value } : current))
-                  }
-                />
-              </label>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block text-sm text-text-secondary">
-                  Год
-                  <input
-                    type="number"
-                    className="mt-1 w-full rounded-md border border-border px-2 py-2 text-sm"
-                    value={treeDialog.year}
-                    onChange={(event) =>
-                      setTreeDialog((current) =>
-                        current ? { ...current, year: Number(event.target.value || 0) } : current,
-                      )
-                    }
-                  />
-                </label>
-
-                <label className="block text-sm text-text-secondary">
-                  Урожай, кг
-                  <input
-                    type="number"
-                    className="mt-1 w-full rounded-md border border-border px-2 py-2 text-sm"
-                    value={treeDialog.harvest}
-                    onChange={(event) =>
-                      setTreeDialog((current) =>
-                        current ? { ...current, harvest: Number(event.target.value || 0) } : current,
-                      )
-                    }
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setTreeDialog(null)}
-                className="rounded-md border border-border px-3 py-2 text-sm text-text-secondary"
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  createTreeObject(treeDialog);
-                  setTreeDialog(null);
-                }}
-                className="rounded-md bg-primary px-3 py-2 text-sm text-white"
-              >
-                Добавить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return <div ref={containerRef} className="relative w-full h-full bg-background"><canvas ref={canvasRef} /></div>;
 }
