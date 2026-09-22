@@ -245,6 +245,26 @@ function applyZoom(canvas: Canvas, newScalePercent: number, centerPoint?: Point)
   canvas.renderAll();
 }
 
+function syncFabricObjectToStore(canvas: Canvas): void {
+  const activeObject = canvas.getActiveObject();
+  if (!activeObject) return;
+
+  const objectId = activeObject.get('objectId');
+  if (!objectId || typeof objectId !== 'string') return;
+
+  const width = activeObject.getScaledWidth ? activeObject.getScaledWidth() : activeObject.width ?? 0;
+  const height = activeObject.getScaledHeight ? activeObject.getScaledHeight() : activeObject.height ?? 0;
+
+  useGardenStore.getState().updateObject(objectId, {
+    x: activeObject.left ?? 0,
+    y: activeObject.top ?? 0,
+    width,
+    height,
+    rotation: activeObject.angle ?? 0,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export default function GardenCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -374,7 +394,16 @@ export default function GardenCanvas() {
         objectCaching: false,
       });
       const id = crypto.randomUUID();
-      const entry = createGardenObjectEntry('bed', 'Грядка', useGardenStore.getState().currentYear, 0, 0, 0, 0);
+      const bounds = polygon.getBoundingRect();
+      const entry = createGardenObjectEntry(
+        'bed',
+        'Грядка',
+        useGardenStore.getState().currentYear,
+        bounds.left,
+        bounds.top,
+        bounds.width,
+        bounds.height,
+      );
       entry.id = id;
       polygon.set('objectId', id);
       polygon.set('objectType', 'bed');
@@ -407,7 +436,16 @@ export default function GardenCanvas() {
         objectCaching: false,
       });
       const id = crypto.randomUUID();
-      const entry = createGardenObjectEntry('bed', 'Грядка', useGardenStore.getState().currentYear, 0, 0, 0, 0);
+      const bounds = polygon.getBoundingRect();
+      const entry = createGardenObjectEntry(
+        'bed',
+        'Грядка',
+        useGardenStore.getState().currentYear,
+        bounds.left,
+        bounds.top,
+        bounds.width,
+        bounds.height,
+      );
       entry.id = id;
       polygon.set('objectId', id);
       polygon.set('objectType', 'bed');
@@ -612,11 +650,19 @@ export default function GardenCanvas() {
       }
     };
 
+    const syncActiveObject = (): void => {
+      syncFabricObjectToStore(canvas);
+    };
+
     canvas.on('mouse:wheel', onWheel);
     canvas.on('mouse:down', handleCanvasClick);
     canvas.on('mouse:move', updateShapeDraft);
     canvas.on('mouse:up', finalizeDraftShape);
     canvas.on('mouse:dblclick', handleDoubleClick);
+    canvas.on('object:moving', syncActiveObject);
+    canvas.on('object:scaling', syncActiveObject);
+    canvas.on('object:modified', syncActiveObject);
+    canvas.on('object:rotating', syncActiveObject);
 
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -633,6 +679,11 @@ export default function GardenCanvas() {
       canvas.off('mouse:down', handleCanvasClick);
       canvas.off('mouse:move', updateShapeDraft);
       canvas.off('mouse:up', finalizeDraftShape);
+      canvas.off('mouse:dblclick', handleDoubleClick);
+      canvas.off('object:moving', syncActiveObject);
+      canvas.off('object:scaling', syncActiveObject);
+      canvas.off('object:modified', syncActiveObject);
+      canvas.off('object:rotating', syncActiveObject);
       resizeObserver.disconnect();
       if (fabricRef.current) {
         fabricRef.current.dispose();
