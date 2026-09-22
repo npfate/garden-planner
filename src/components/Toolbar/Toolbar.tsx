@@ -12,6 +12,9 @@ import {
   Unlock,
   PencilRuler,
   Grid3X3,
+  Droplets,
+  House,
+  Leaf,
 } from 'lucide-react';
 import { useGardenStore, type ToolId } from '../../store/gardenStore';
 
@@ -28,6 +31,9 @@ const TOOLS: ToolbarTool[] = [
   { id: 'eraser', label: 'Ластик', icon: Trash2 },
   { id: 'tree', label: 'Добавить дерево', icon: Square },
   { id: 'barrel', label: 'Бочка', icon: Circle },
+  { id: 'well', label: 'Колодец', icon: Droplets },
+  { id: 'greenhouse', label: 'Теплица', icon: Leaf },
+  { id: 'shed', label: 'Сарай', icon: House },
 ];
 
 function fileToBase64(file: File): Promise<string> {
