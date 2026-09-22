@@ -251,6 +251,7 @@ export default function GardenCanvas() {
   const fabricRef = useRef<Canvas | null>(null);
   const activeToolRef = useRef<ToolId>('pointer');
   const shapeDraftRef = useRef<ShapeDraft | null>(null);
+  const bedPointsRef = useRef<Point[]>([]);
   const polygonPointsRef = useRef<Point[]>([]);
 
   const setCanvas = useGardenStore((s) => s.setCanvas);
@@ -344,6 +345,50 @@ export default function GardenCanvas() {
       shapeDraftRef.current = null;
     };
 
+    const finalizeBedDraft = (): void => {
+      if (bedPointsRef.current.length < 2) {
+        bedPointsRef.current = [];
+        return;
+      }
+
+      const points = bedPointsRef.current.map((point) => ({ ...point }));
+      const minX = Math.min(...points.map((point) => point.x));
+      const minY = Math.min(...points.map((point) => point.y));
+      const maxX = Math.max(...points.map((point) => point.x));
+      const maxY = Math.max(...points.map((point) => point.y));
+      const bedPoints = [
+        new Point(minX, minY),
+        new Point(maxX, minY),
+        new Point(maxX, maxY),
+        new Point(minX, maxY),
+      ];
+
+      const polygon = new Polygon(bedPoints, {
+        fill: '#facc15',
+        stroke: '#1f2937',
+        strokeWidth: 1,
+        selectable: true,
+        evented: true,
+        hasControls: true,
+        hasBorders: true,
+        objectCaching: false,
+      });
+      const id = crypto.randomUUID();
+      const entry = createGardenObjectEntry('bed', 'Грядка', useGardenStore.getState().currentYear, 0, 0, 0, 0);
+      entry.id = id;
+      polygon.set('objectId', id);
+      polygon.set('objectType', 'bed');
+      polygon.set('name', 'Грядка');
+      polygon.set('year', useGardenStore.getState().currentYear);
+      polygon.set('selectable', true);
+      polygon.set('evented', true);
+      canvas.add(polygon);
+      canvas.setActiveObject(polygon);
+      canvas.renderAll();
+      useGardenStore.getState().addObject(entry);
+      bedPointsRef.current = [];
+    };
+
     const finalizePolygonDraft = (): void => {
       if (polygonPointsRef.current.length < 3) {
         polygonPointsRef.current = [];
@@ -421,6 +466,44 @@ export default function GardenCanvas() {
       if (currentTool === 'pointer' || currentTool === 'eraser') {
         canvas.discardActiveObject();
         canvas.renderAll();
+        return;
+      }
+
+      if (currentTool === 'bed') {
+        const pointer = canvas.getScenePoint(event.e);
+        const snapped = getSnapPoint(pointer.x, pointer.y);
+        const point = new Point(snapped.x, snapped.y);
+        bedPointsRef.current = [...bedPointsRef.current, point];
+
+        const points = bedPointsRef.current;
+        if (points.length >= 2) {
+          const minX = Math.min(...points.map((p) => p.x));
+          const minY = Math.min(...points.map((p) => p.y));
+          const maxX = Math.max(...points.map((p) => p.x));
+          const maxY = Math.max(...points.map((p) => p.y));
+          const previewPoints = [
+            new Point(minX, minY),
+            new Point(maxX, minY),
+            new Point(maxX, maxY),
+            new Point(minX, maxY),
+          ];
+
+          const previous = canvas.getObjects().find((o) => o.get('objectType') === 'bed' && o.get('name') === 'Грядка-черновик');
+          if (previous) canvas.remove(previous);
+
+          const preview = new Polygon(previewPoints, {
+            fill: '#facc15',
+            stroke: '#1f2937',
+            strokeWidth: 1,
+            selectable: false,
+            evented: false,
+            objectCaching: false,
+          });
+          preview.set('name', 'Грядка-черновик');
+          preview.set('objectType', 'bed');
+          canvas.add(preview);
+          canvas.renderAll();
+        }
         return;
       }
 
@@ -520,6 +603,10 @@ export default function GardenCanvas() {
     };
 
     const handleDoubleClick = (): void => {
+      if (activeToolRef.current === 'bed') {
+        finalizeBedDraft();
+      }
+
       if (activeToolRef.current === 'polygon') {
         finalizePolygonDraft();
       }

@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import {
   MousePointer2,
+  Square,
   Hexagon,
   Type,
   Eraser,
@@ -26,6 +27,7 @@ type ToolbarTool = {
 
 const TOOLS: ToolbarTool[] = [
   { id: 'pointer', label: 'Указатель', icon: MousePointer2 },
+  { id: 'bed', label: 'Грядка', icon: Square },
   { id: 'polygon', label: 'Полигон', icon: Hexagon },
   { id: 'text', label: 'Текст', icon: Type },
   { id: 'eraser', label: 'Ластик', icon: Eraser },
