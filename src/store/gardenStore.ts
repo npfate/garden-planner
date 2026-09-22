@@ -2,6 +2,17 @@ import { create } from 'zustand';
 import type { Canvas as FabricCanvas } from 'fabric';
 import type { GardenObject } from '../types/garden';
 
+export type ToolId =
+  | 'pointer'
+  | 'polygon'
+  | 'tree'
+  | 'text'
+  | 'eraser'
+  | 'barrel'
+  | 'well'
+  | 'greenhouse'
+  | 'shed';
+
 export interface GardenFileSnapshot {
   version: number;
   savedAt: string;
@@ -9,6 +20,8 @@ export interface GardenFileSnapshot {
   backgroundImage: string | null;
   currentYear: number;
   scale: number;
+  snapToGrid: boolean;
+  activeTool: ToolId;
 }
 
 interface GardenState {
@@ -17,6 +30,8 @@ interface GardenState {
   selectedObjectId: string | null;
   scale: number;
   gridStep: number;
+  snapToGrid: boolean;
+  activeTool: ToolId;
   backgroundImage: string | null;
   backgroundLocked: boolean;
   canvas: FabricCanvas | null;
@@ -30,6 +45,8 @@ interface GardenActions {
   selectObject: (id: string | null) => void;
   setScale: (scale: number) => void;
   setGridStep: (step: number) => void;
+  setSnapToGrid: (value: boolean) => void;
+  setActiveTool: (tool: ToolId) => void;
   setBackgroundImage: (url: string | null) => void;
   setBackgroundLocked: (locked: boolean) => void;
   setCanvas: (canvas: FabricCanvas | null) => void;
@@ -45,6 +62,8 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   selectedObjectId: null,
   scale: 100,
   gridStep: 1,
+  snapToGrid: false,
+  activeTool: 'pointer',
   backgroundImage: null,
   backgroundLocked: false,
   canvas: null,
@@ -86,6 +105,14 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     set({ gridStep: Math.max(0.1, step) });
   },
 
+  setSnapToGrid: (value: boolean): void => {
+    set({ snapToGrid: value });
+  },
+
+  setActiveTool: (tool: ToolId): void => {
+    set({ activeTool: tool });
+  },
+
   setBackgroundImage: (url: string | null): void => {
     set({ backgroundImage: url });
   },
@@ -107,6 +134,8 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       backgroundImage: state.backgroundImage,
       currentYear: state.currentYear,
       scale: state.scale,
+      snapToGrid: state.snapToGrid,
+      activeTool: state.activeTool,
     };
     return JSON.stringify(snapshot, null, 2);
   },
@@ -123,7 +152,12 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
         typeof p.backgroundImage === 'string' ? p.backgroundImage : null;
       const currentYear: number = typeof p.currentYear === 'number' ? p.currentYear : 2024;
       const scale: number = typeof p.scale === 'number' ? p.scale : 100;
-      set({ objects, backgroundImage, currentYear, scale, selectedObjectId: null });
+      const snapToGrid: boolean = typeof p.snapToGrid === 'boolean' ? p.snapToGrid : false;
+      const activeTool: ToolId =
+        typeof p.activeTool === 'string' && ['pointer', 'polygon', 'tree', 'text', 'eraser', 'barrel', 'well', 'greenhouse', 'shed'].includes(p.activeTool)
+          ? (p.activeTool as ToolId)
+          : 'pointer';
+      set({ objects, backgroundImage, currentYear, scale, snapToGrid, activeTool, selectedObjectId: null });
     } catch (err) {
       console.error('Ошибка загрузки .garden файла:', err);
       throw err;

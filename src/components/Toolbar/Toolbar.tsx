@@ -10,17 +10,24 @@ import {
   Image as ImageIcon,
   Lock,
   Unlock,
+  PencilRuler,
+  Grid3X3,
 } from 'lucide-react';
-import { useGardenStore } from '../../store/gardenStore';
+import { useGardenStore, type ToolId } from '../../store/gardenStore';
 
-type ToolId = 'pointer' | 'square' | 'circle' | 'text' | 'eraser';
+type ToolbarTool = {
+  id: ToolId;
+  label: string;
+  icon: typeof MousePointer2;
+};
 
-const TOOLS: Array<{ id: ToolId; label: string; icon: typeof MousePointer2 }> = [
+const TOOLS: ToolbarTool[] = [
   { id: 'pointer', label: 'Указатель', icon: MousePointer2 },
-  { id: 'square', label: 'Прямоугольник', icon: Square },
-  { id: 'circle', label: 'Круг', icon: Circle },
+  { id: 'polygon', label: 'Полигон', icon: PencilRuler },
   { id: 'text', label: 'Текст', icon: Type },
   { id: 'eraser', label: 'Ластик', icon: Trash2 },
+  { id: 'tree', label: 'Добавить дерево', icon: Square },
+  { id: 'barrel', label: 'Бочка', icon: Circle },
 ];
 
 function fileToBase64(file: File): Promise<string> {
@@ -34,9 +41,13 @@ function fileToBase64(file: File): Promise<string> {
 
 export default function Toolbar() {
   const scale = useGardenStore((s) => s.scale);
+  const activeTool = useGardenStore((s) => s.activeTool);
+  const snapToGrid = useGardenStore((s) => s.snapToGrid);
   const backgroundLocked = useGardenStore((s) => s.backgroundLocked);
   const hasBackground = useGardenStore((s) => !!s.backgroundImage);
   const setScale = useGardenStore((s) => s.setScale);
+  const setActiveTool = useGardenStore((s) => s.setActiveTool);
+  const setSnapToGrid = useGardenStore((s) => s.setSnapToGrid);
   const setBackgroundImage = useGardenStore((s) => s.setBackgroundImage);
   const setBackgroundLocked = useGardenStore((s) => s.setBackgroundLocked);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -65,8 +76,9 @@ export default function Toolbar() {
             type="button"
             title={label}
             aria-label={label}
+            onClick={() => setActiveTool(id)}
             className={`w-9 h-9 flex items-center justify-center rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-background transition-colors ${
-              id === 'pointer' ? 'bg-background text-primary border-primary' : ''
+              activeTool === id ? 'bg-background text-primary border-primary' : ''
             }`}
           >
             <Icon size={18} />
@@ -75,6 +87,19 @@ export default function Toolbar() {
       </nav>
 
       <div className="ml-auto flex items-center gap-1">
+        <button
+          type="button"
+          title={snapToGrid ? 'Отключить привязку к сетке' : 'Включить привязку к сетке'}
+          aria-label={snapToGrid ? 'Отключить привязку к сетке' : 'Включить привязку к сетке'}
+          onClick={() => setSnapToGrid(!snapToGrid)}
+          className={`w-9 h-9 flex items-center justify-center rounded-md border border-border transition-colors ${
+            snapToGrid
+              ? 'bg-primary text-white border-primary hover:bg-primary-hover'
+              : 'text-text-secondary hover:text-text-primary hover:bg-background'
+          }`}
+        >
+          <Grid3X3 size={18} />
+        </button>
         <div className="flex items-center gap-1 mr-2 pr-3 border-r border-border">
           <button
             type="button"
