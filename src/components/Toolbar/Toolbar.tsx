@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import {
   MousePointer2,
   Square,
+  Hand,
   ZoomIn,
   ZoomOut,
   Image as ImageIcon,
@@ -19,6 +20,7 @@ type ToolbarTool = {
 
 const TOOLS: ToolbarTool[] = [
   { id: 'select', label: 'Выделение', icon: MousePointer2 },
+  { id: 'pan', label: 'Рука (Перемещение схемы)', icon: Hand },
   { id: 'bed', label: 'Грядка', icon: Square },
 ];
 

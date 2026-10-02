@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { ActiveSelection, Canvas, FabricImage, Group, Line, Point, Rect } from 'fabric';
+import { Canvas, FabricImage, Group, Line, Point, Rect } from 'fabric';
 import type { TPointerEvent, TPointerEventInfo, FabricObject } from 'fabric';
 import { useGardenStore, type ToolId } from '../../store/gardenStore';
 import type { GardenObject, GardenObjectType } from '../../types/garden';
@@ -10,6 +10,8 @@ const ZOOM_FACTOR = 1.1;
 const MIN_SCALE = 10;
 const MAX_SCALE = 500;
 const MARKER_SIZE = 10;
+
+type CanvasAny = Record<string, unknown>;
 
 function sendObjectToBottom(canvas: Canvas, obj: Line | Group | FabricImage): void {
   canvas.sendObjectToBack(obj);
@@ -183,8 +185,12 @@ function syncFabricObjectToStore(canvas: Canvas): void {
   const objectId = activeObject.get('gardenObjectId') ?? activeObject.get('objectId');
   if (!objectId || typeof objectId !== 'string') return;
 
-  const width = activeObject.getScaledWidth ? activeObject.getScaledWidth() : activeObject.width ?? 0;
-  const height = activeObject.getScaledHeight ? activeObject.getScaledHeight() : activeObject.height ?? 0;
+  const width = activeObject.getScaledWidth
+    ? activeObject.getScaledWidth()
+    : activeObject.width ?? 0;
+  const height = activeObject.getScaledHeight
+    ? activeObject.getScaledHeight()
+    : activeObject.height ?? 0;
 
   useGardenStore.getState().updateObject(objectId, {
     x: activeObject.left ?? 0,
@@ -226,6 +232,7 @@ export default function GardenCanvas() {
   const fabricRef = useRef<Canvas | null>(null);
   const activeToolRef = useRef<ToolId>('select');
   const bedDraftRef = useRef<{ start: Point; preview: Rect | null } | null>(null);
+  const isSpacePressedRef = useRef<boolean>(false);
 
   const setCanvas = useGardenStore((s) => s.setCanvas);
   const setScale = useGardenStore((s) => s.setScale);
@@ -239,6 +246,70 @@ export default function GardenCanvas() {
   useEffect(() => {
     activeToolRef.current = activeTool;
   }, [activeTool]);
+
+  // ----- Глобальные обработчики Пробела -----
+  useEffect(() => {
+    const setCursorIdle = () => {
+      const c = fabricRef.current;
+      if (!c) return;
+      const tool = useGardenStore.getState().activeTool;
+      if (tool === 'bed') {
+        c.defaultCursor = 'crosshair';
+        c.hoverCursor = 'crosshair';
+        return;
+      }
+      if (tool === 'pan') {
+        c.defaultCursor = 'grab';
+        c.hoverCursor = 'grab';
+        c.moveCursor = 'grab';
+        return;
+      }
+      // select
+      c.defaultCursor = 'default';
+      c.hoverCursor = 'move';
+      c.moveCursor = 'move';
+    };
+
+    const onKeyDown = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement | null;
+      const isEditable =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          Boolean(target.isContentEditable));
+      if (e.code !== 'Space' || e.repeat || isEditable) return;
+      e.preventDefault();
+      if (isSpacePressedRef.current) return;
+      isSpacePressedRef.current = true;
+      const c = fabricRef.current as CanvasAny | null;
+      if (c && c.isDragging !== true) {
+        setCursorIdle();
+        const fc = fabricRef.current;
+        if (fc) {
+          fc.defaultCursor = 'grab';
+          fc.hoverCursor = 'grab';
+          fc.moveCursor = 'grab';
+        }
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent): void => {
+      if (e.code !== 'Space') return;
+      e.preventDefault();
+      isSpacePressedRef.current = false;
+      const c = fabricRef.current as CanvasAny | null;
+      if (!c || c.isDragging !== true) {
+        setCursorIdle();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -262,12 +333,8 @@ export default function GardenCanvas() {
 
     const onWheel = (opt: TPointerEventInfo<TPointerEvent>): void => {
       const evt = opt.e;
-      const isWheel =
-        typeof (evt as unknown as WheelEvent).deltaY === 'number' &&
-        ((evt as unknown as WheelEvent).type === 'wheel' ||
-          (evt as unknown as WheelEvent).type === 'mousewheel');
-      if (!isWheel) return;
-      if (!evt.ctrlKey && !evt.metaKey) return;
+      const isWheel = typeof (evt as unknown as WheelEvent).deltaY === 'number';
+      if (!isWheel || (!evt.ctrlKey && !evt.metaKey)) return;
       evt.preventDefault();
       evt.stopPropagation();
 
@@ -286,13 +353,41 @@ export default function GardenCanvas() {
       setScale(clamped);
     };
 
+    const onSelectionChanged = (): void => {
+      const activeObj = canvas.getActiveObject();
+      if (!activeObj) {
+        selectObject(null);
+        return;
+      }
+      // Если выделена группа, берем первый объект для простоты
+      const targetObj =
+        activeObj.type === 'activeSelection'
+          ? // @ts-expect-error ActiveSelection has getObjects
+            (activeObj.getObjects() as FabricObject[])[0]
+          : activeObj;
+
+      const objectId =
+        targetObj &&
+        ((targetObj.get('gardenObjectId') as unknown) ??
+          (targetObj.get('objectId') as unknown));
+      selectObject(typeof objectId === 'string' ? objectId : null);
+    };
+
+    const onSelectionCleared = (): void => {
+      selectObject(null);
+    };
+
+    const onObjectModified = (): void => {
+      syncFabricObjectToStore(canvas);
+      onSelectionChanged(); // Обновляем store при перемещении/масштабировании
+    };
+
     const finalizeBedDraft = (point: Point): void => {
       const draft = bedDraftRef.current;
       if (!draft) return;
 
-      const preview = draft.preview;
-      if (preview) {
-        canvas.remove(preview);
+      if (draft.preview) {
+        canvas.remove(draft.preview);
       }
 
       const start = draft.start;
@@ -318,7 +413,11 @@ export default function GardenCanvas() {
 
       const id = crypto.randomUUID();
       const currentYear = useGardenStore.getState().currentYear;
-      const existingBeds = useGardenStore.getState().objects.filter((item) => item.type === 'bed').length + 1;
+      const existingBeds =
+        useGardenStore
+          .getState()
+          .objects.filter((item) => item.type === 'bed')
+          .length + 1;
       const name = `Грядка ${existingBeds}`;
 
       const entry = createGardenObjectEntry('bed', name, currentYear, left, top, width, height);
@@ -328,51 +427,63 @@ export default function GardenCanvas() {
       rect.set('objectType', 'bed');
       rect.set('name', name);
       rect.set('year', currentYear);
-      rect.set('selectable', true);
-      rect.set('evented', true);
-      rect.set('hasControls', true);
-      rect.set('hasBorders', true);
 
       canvas.add(rect);
-      canvas.setActiveObject(rect);
-      canvas.renderAll();
+
+      // 1. Добавляем в store
       useGardenStore.getState().addObject(entry);
-      useGardenStore.getState().selectObject(id);
+
+      // 2. Делаем активным в canvas
+      canvas.setActiveObject(rect);
+
+      // 3. Синхронизируем выделение в store
+      onSelectionChanged();
+
+      canvas.renderAll();
+
+      // 4. Переключаем инструмент (это запустит useEffect, который восстановит выделение)
       useGardenStore.getState().setActiveTool('select');
       activeToolRef.current = 'select';
       bedDraftRef.current = null;
     };
 
-    const syncSelectionToStore = (selection: ActiveSelection | FabricObject | null): void => {
-      if (!selection) {
-        selectObject(null);
-        return;
-      }
-
-      const object = selection instanceof ActiveSelection ? selection.getObjects()[0] : selection;
-      const objectId = object?.get('gardenObjectId') ?? object?.get('objectId');
-      if (typeof objectId === 'string') {
-        selectObject(objectId);
-      } else {
-        selectObject(null);
-      }
-    };
-
-    const handleCanvasClick = (event: TPointerEventInfo<TPointerEvent>): void => {
+    const handleMouseDown = (event: TPointerEventInfo<TPointerEvent>): void => {
       const currentTool = activeToolRef.current;
-      const target = canvas.findTarget(event.e) as { type?: string } | null;
+      const canvasAny = canvas as unknown as CanvasAny;
+
+      const raw = event.e as PointerEvent;
+      const mouseButton = typeof raw.button === 'number' ? raw.button : 0;
+      // 0 - ЛКМ, 1 - средняя (колесо), 2 - правая
+      const isMiddle = mouseButton === 1;
+      const isSpaceAndLeft = mouseButton === 0 && isSpacePressedRef.current;
+      const isPanToolAndLeft = mouseButton === 0 && currentTool === 'pan';
+
+      // --- Pan начало: ХОТЯ БЫ ОДНО из условий ---
+      if (isMiddle || isSpaceAndLeft || isPanToolAndLeft) {
+        if (isMiddle) raw.preventDefault();
+        canvasAny.isDragging = true;
+        const infoAny = event as unknown as { absolutePointer?: { x: number; y: number }; pointer?: { x: number; y: number } };
+        const ptrRaw = infoAny.absolutePointer ?? infoAny.pointer ?? { x: 0, y: 0 };
+        const ptr = new Point(ptrRaw.x, ptrRaw.y);
+        canvasAny.lastPosX = ptr.x;
+        canvasAny.lastPosY = ptr.y;
+        // НЕ сбрасываем выделение, чтобы не сбросить случайно
+        canvas.defaultCursor = 'grabbing';
+        canvas.hoverCursor = 'grabbing';
+        canvas.moveCursor = 'grabbing';
+        return; // ← Pan приоритет: не запускаем select/bed логику
+      }
 
       if (currentTool === 'select') {
-        if (target && target.type && target.type !== 'group') {
-          canvas.setActiveObject(target as never);
+        // Если кликнули по пустому месту - снимаем выделение
+        const target = canvas.findTarget(event.e) as unknown as FabricObject | null;
+        if (!target) {
+          canvas.discardActiveObject();
           canvas.renderAll();
-          syncSelectionToStore(target as FabricObject);
-          return;
+          selectObject(null);
         }
-
-        canvas.discardActiveObject();
-        canvas.renderAll();
-        selectObject(null);
+        // Если кликнули по объекту, Fabric.js сам обработает выделение,
+        // а onSelectionChanged обновит store.
         return;
       }
 
@@ -390,18 +501,28 @@ export default function GardenCanvas() {
         }
 
         finalizeBedDraft(point);
-        return;
       }
     };
 
-    const handleDoubleClick = (): void => {
-      if (activeToolRef.current === 'bed' && bedDraftRef.current) {
-        const point = bedDraftRef.current.start;
-        finalizeBedDraft(point);
-      }
-    };
+    const handleMouseMove = (event: TPointerEventInfo<TPointerEvent>): void => {
+      const canvasAny = canvas as unknown as CanvasAny;
 
-    const handleBedMouseMove = (event: TPointerEventInfo<TPointerEvent>): void => {
+      // --- Pan: двигаем схему ---
+      if (canvasAny.isDragging === true) {
+        const infoAny = event as unknown as { absolutePointer?: { x: number; y: number }; pointer?: { x: number; y: number } };
+        const ptrRaw = infoAny.absolutePointer ?? infoAny.pointer ?? { x: 0, y: 0 };
+        const ptr = new Point(ptrRaw.x, ptrRaw.y);
+        const lastX = (canvasAny.lastPosX as number) ?? ptr.x;
+        const lastY = (canvasAny.lastPosY as number) ?? ptr.y;
+        const deltaX = ptr.x - lastX;
+        const deltaY = ptr.y - lastY;
+        canvas.relativePan(new Point(deltaX, deltaY));
+        canvasAny.lastPosX = ptr.x;
+        canvasAny.lastPosY = ptr.y;
+        canvas.renderAll();
+        return; // ← не рисуем превью грядки и т.д.
+      }
+
       if (activeToolRef.current !== 'bed' || !bedDraftRef.current) return;
 
       const pointer = canvas.getScenePoint(event.e);
@@ -419,41 +540,54 @@ export default function GardenCanvas() {
       canvas.renderAll();
     };
 
-    const syncActiveObject = (): void => {
-      syncFabricObjectToStore(canvas);
+    const handleDoubleClick = (): void => {
+      if (activeToolRef.current === 'bed' && bedDraftRef.current) {
+        finalizeBedDraft(bedDraftRef.current.start);
+      }
     };
 
-    const syncSelectionChanged = (event: { selected?: FabricObject[] | FabricObject | null }): void => {
-      const selected = event.selected ?? null;
-      if (!selected) {
-        selectObject(null);
+    const handleMouseUp = (): void => {
+      const canvasAny = canvas as unknown as CanvasAny;
+      canvasAny.isDragging = false;
+
+      // восстанавливаем курсор в зависимости от пробела и активного инструмента
+      const tool = useGardenStore.getState().activeTool;
+      if (isSpacePressedRef.current) {
+        canvas.defaultCursor = 'grab';
+        canvas.hoverCursor = 'grab';
+        canvas.moveCursor = 'grab';
         return;
       }
-
-      const objects = Array.isArray(selected) ? selected : [selected];
-      const first = objects[0];
-      const objectId = first?.get('gardenObjectId') ?? first?.get('objectId');
-      selectObject(typeof objectId === 'string' ? objectId : null);
+      if (tool === 'bed') {
+        canvas.defaultCursor = 'crosshair';
+        canvas.hoverCursor = 'crosshair';
+        return;
+      }
+      if (tool === 'pan') {
+        canvas.defaultCursor = 'grab';
+        canvas.hoverCursor = 'grab';
+        canvas.moveCursor = 'grab';
+        return;
+      }
+      // select
+      canvas.defaultCursor = 'default';
+      canvas.hoverCursor = 'move';
+      canvas.moveCursor = 'move';
     };
 
+    // --- Привязка событий ---
     canvas.on('mouse:wheel', onWheel);
-    canvas.on('mouse:down', handleCanvasClick);
-    canvas.on('mouse:move', handleBedMouseMove);
+    canvas.on('mouse:down', handleMouseDown);
+    canvas.on('mouse:move', handleMouseMove);
+    canvas.on('mouse:up', handleMouseUp);
     canvas.on('mouse:dblclick', handleDoubleClick);
-    canvas.on('selection:created', (event) => syncSelectionChanged(event));
-    canvas.on('selection:updated', (event) => syncSelectionChanged(event));
-    canvas.on('selection:cleared', () => selectObject(null));
-    canvas.on('object:modified', () => {
-      syncActiveObject();
-      const activeObject = canvas.getActiveObject();
-      const objectId = activeObject?.get('gardenObjectId') ?? activeObject?.get('objectId');
-      if (typeof objectId === 'string') {
-        selectObject(objectId);
-      }
-    });
-    canvas.on('object:moving', syncActiveObject);
-    canvas.on('object:scaling', syncActiveObject);
-    canvas.on('object:rotating', syncActiveObject);
+    canvas.on('selection:created', onSelectionChanged);
+    canvas.on('selection:updated', onSelectionChanged);
+    canvas.on('selection:cleared', onSelectionCleared);
+    canvas.on('object:modified', onObjectModified);
+    canvas.on('object:moving', onObjectModified);
+    canvas.on('object:scaling', onObjectModified);
+    canvas.on('object:rotating', onObjectModified);
 
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -465,25 +599,21 @@ export default function GardenCanvas() {
 
     resizeObserver.observe(containerRef.current);
 
+    // --- Очистка ---
     return () => {
       canvas.off('mouse:wheel', onWheel);
-      canvas.off('mouse:down', handleCanvasClick);
-      canvas.off('mouse:move', handleBedMouseMove);
+      canvas.off('mouse:down', handleMouseDown);
+      canvas.off('mouse:move', handleMouseMove);
+      canvas.off('mouse:up', handleMouseUp);
       canvas.off('mouse:dblclick', handleDoubleClick);
-      canvas.off('selection:created', (event) => syncSelectionChanged(event));
-      canvas.off('selection:updated', (event) => syncSelectionChanged(event));
-      canvas.off('selection:cleared', () => selectObject(null));
-      canvas.off('object:modified', () => {
-        syncActiveObject();
-        const activeObject = canvas.getActiveObject();
-        const objectId = activeObject?.get('gardenObjectId') ?? activeObject?.get('objectId');
-        if (typeof objectId === 'string') {
-          selectObject(objectId);
-        }
-      });
-      canvas.off('object:moving', syncActiveObject);
-      canvas.off('object:scaling', syncActiveObject);
-      canvas.off('object:rotating', syncActiveObject);
+      canvas.off('selection:created', onSelectionChanged);
+      canvas.off('selection:updated', onSelectionChanged);
+      canvas.off('selection:cleared', onSelectionCleared);
+      canvas.off('object:modified', onObjectModified);
+      canvas.off('object:moving', onObjectModified);
+      canvas.off('object:scaling', onObjectModified);
+      canvas.off('object:rotating', onObjectModified);
+
       resizeObserver.disconnect();
       if (fabricRef.current) {
         fabricRef.current.dispose();
@@ -491,7 +621,7 @@ export default function GardenCanvas() {
       }
       setCanvas(null);
     };
-  }, [setCanvas, setScale]);
+  }, [setCanvas, setScale, selectObject]);
 
   useEffect(() => {
     if (!fabricRef.current) return;
@@ -503,18 +633,48 @@ export default function GardenCanvas() {
     drawGrid(fabricRef.current, gridStep);
   }, [gridStep]);
 
+  // --- Переключение инструментов: курсоры, выделяемость объектов ---
   useEffect(() => {
     if (!fabricRef.current) return;
 
     const canvas = fabricRef.current;
-    const bedMode = activeTool === 'bed';
 
-    canvas.selection = !bedMode;
-    canvas.defaultCursor = bedMode ? 'crosshair' : 'default';
-    canvas.hoverCursor = bedMode ? 'crosshair' : 'move';
+    // 1. Общие настройки по инструментам
+    if (activeTool === 'bed') {
+      canvas.selection = false;
+      canvas.defaultCursor = 'crosshair';
+      canvas.hoverCursor = 'crosshair';
+      canvas.moveCursor = 'crosshair';
+    } else if (activeTool === 'pan') {
+      canvas.selection = false;
+      canvas.defaultCursor = 'grab';
+      canvas.hoverCursor = 'grab';
+      canvas.moveCursor = 'grab';
+    } else {
+      // select
+      canvas.selection = true;
+      if (isSpacePressedRef.current) {
+        canvas.defaultCursor = 'grab';
+        canvas.hoverCursor = 'grab';
+        canvas.moveCursor = 'grab';
+      } else {
+        canvas.defaultCursor = 'default';
+        canvas.hoverCursor = 'move';
+        canvas.moveCursor = 'move';
+      }
+    }
 
+    // 2. Настройка selectable/evented на объектах (сетка/фон пропускаем)
     canvas.forEachObject((obj) => {
-      const isSelectable = !bedMode;
+      // @ts-expect-error custom runtime property
+      if (obj.__gardenGrid || obj.__gardenBackground) return;
+
+      let isSelectable: boolean;
+      if (activeTool === 'bed' || activeTool === 'pan') {
+        isSelectable = false;
+      } else {
+        isSelectable = true;
+      }
       obj.set({
         selectable: isSelectable,
         evented: isSelectable,
@@ -523,9 +683,24 @@ export default function GardenCanvas() {
       });
     });
 
-    if (bedMode) {
+    // 3. При pan/bed: сбрасываем active object, если есть
+    if (activeTool === 'bed' || activeTool === 'pan') {
       canvas.discardActiveObject();
       useGardenStore.getState().selectObject(null);
+    } else {
+      // select: восстанавливаем выделение
+      const selectedId = useGardenStore.getState().selectedObjectId;
+      if (selectedId) {
+        const obj = canvas
+          .getObjects()
+          .find(
+            (o) =>
+              (o.get('gardenObjectId') ?? o.get('objectId')) === selectedId,
+          );
+        if (obj) {
+          canvas.setActiveObject(obj);
+        }
+      }
     }
 
     canvas.renderAll();
@@ -535,7 +710,11 @@ export default function GardenCanvas() {
     if (!fabricRef.current) return;
 
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || activeToolRef.current !== 'bed' || !bedDraftRef.current) {
+      if (
+        event.key !== 'Escape' ||
+        activeToolRef.current !== 'bed' ||
+        !bedDraftRef.current
+      ) {
         return;
       }
 
@@ -570,5 +749,9 @@ export default function GardenCanvas() {
     setBackgroundSelectable(fabricRef.current, !backgroundLocked);
   }, [backgroundLocked]);
 
-  return <div ref={containerRef} className="relative w-full h-full bg-background"><canvas ref={canvasRef} /></div>;
+  return (
+    <div ref={containerRef} className="relative w-full h-full bg-background">
+      <canvas ref={canvasRef} />
+    </div>
+  );
 }
