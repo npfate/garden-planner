@@ -233,6 +233,8 @@ export default function GardenCanvas() {
   const activeToolRef = useRef<ToolId>('select');
   const bedDraftRef = useRef<{ start: Point; preview: Rect | null } | null>(null);
   const isSpacePressedRef = useRef<boolean>(false);
+  const isPanningRef = useRef<boolean>(false);
+  const lastScreenPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const setCanvas = useGardenStore((s) => s.setCanvas);
   const setScale = useGardenStore((s) => s.setScale);
@@ -461,12 +463,14 @@ export default function GardenCanvas() {
       // --- Pan начало: ХОТЯ БЫ ОДНО из условий ---
       if (isMiddle || isSpaceAndLeft || isPanToolAndLeft) {
         if (isMiddle) raw.preventDefault();
+        const rect = (canvas.upperCanvasEl as HTMLCanvasElement).getBoundingClientRect();
+        const sx = raw.clientX - rect.left;
+        const sy = raw.clientY - rect.top;
+        isPanningRef.current = true;
         canvasAny.isDragging = true;
-        const infoAny = event as unknown as { absolutePointer?: { x: number; y: number }; pointer?: { x: number; y: number } };
-        const ptrRaw = infoAny.absolutePointer ?? infoAny.pointer ?? { x: 0, y: 0 };
-        const ptr = new Point(ptrRaw.x, ptrRaw.y);
-        canvasAny.lastPosX = ptr.x;
-        canvasAny.lastPosY = ptr.y;
+        lastScreenPosRef.current = { x: sx, y: sy };
+        canvasAny.lastPosX = sx;
+        canvasAny.lastPosY = sy;
         // НЕ сбрасываем выделение, чтобы не сбросить случайно
         canvas.defaultCursor = 'grabbing';
         canvas.hoverCursor = 'grabbing';
@@ -508,17 +512,18 @@ export default function GardenCanvas() {
       const canvasAny = canvas as unknown as CanvasAny;
 
       // --- Pan: двигаем схему ---
-      if (canvasAny.isDragging === true) {
-        const infoAny = event as unknown as { absolutePointer?: { x: number; y: number }; pointer?: { x: number; y: number } };
-        const ptrRaw = infoAny.absolutePointer ?? infoAny.pointer ?? { x: 0, y: 0 };
-        const ptr = new Point(ptrRaw.x, ptrRaw.y);
-        const lastX = (canvasAny.lastPosX as number) ?? ptr.x;
-        const lastY = (canvasAny.lastPosY as number) ?? ptr.y;
-        const deltaX = ptr.x - lastX;
-        const deltaY = ptr.y - lastY;
-        canvas.relativePan(new Point(deltaX, deltaY));
-        canvasAny.lastPosX = ptr.x;
-        canvasAny.lastPosY = ptr.y;
+      if (isPanningRef.current || canvasAny.isDragging === true) {
+        const raw = event.e as PointerEvent;
+        const rect = (canvas.upperCanvasEl as HTMLCanvasElement).getBoundingClientRect();
+        const sx = raw.clientX - rect.left;
+        const sy = raw.clientY - rect.top;
+        const last = lastScreenPosRef.current ?? { x: sx, y: sy };
+        const dx = sx - last.x;
+        const dy = sy - last.y;
+        canvas.relativePan(new Point(dx, dy));
+        lastScreenPosRef.current = { x: sx, y: sy };
+        canvasAny.lastPosX = sx;
+        canvasAny.lastPosY = sy;
         canvas.renderAll();
         return; // ← не рисуем превью грядки и т.д.
       }
@@ -548,7 +553,11 @@ export default function GardenCanvas() {
 
     const handleMouseUp = (): void => {
       const canvasAny = canvas as unknown as CanvasAny;
+      isPanningRef.current = false;
       canvasAny.isDragging = false;
+      lastScreenPosRef.current = null;
+      canvasAny.lastPosX = undefined;
+      canvasAny.lastPosY = undefined;
 
       // восстанавливаем курсор в зависимости от пробела и активного инструмента
       const tool = useGardenStore.getState().activeTool;
