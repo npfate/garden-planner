@@ -11,6 +11,7 @@ import {
   createFabricObjectFromEntry,
   drawGrid,
   findObjectByGardenId,
+  markAsCreatedOnCanvas,
   reconcileObjectsWithStore,
   getGardenId,
   getSnapPoint,
@@ -234,6 +235,7 @@ export default function GardenCanvas() {
 
       // fabric-объект строится из записи store — тот же путь, что и при загрузке проекта
       const rect = createFabricObjectFromEntry(entry);
+      markAsCreatedOnCanvas(rect);
 
       gs.addObject(entry);
       canvas.add(rect);
@@ -262,6 +264,7 @@ export default function GardenCanvas() {
       gs.addObject(entry);
 
       const marker = createFabricObjectFromEntry(entry);
+      markAsCreatedOnCanvas(marker);
       canvas.add(marker);
       canvas.setActiveObject(marker);
       selectByObject(marker);
@@ -392,11 +395,28 @@ export default function GardenCanvas() {
       if (!activeObj) return;
       const id = getGardenId(activeObj);
       if (!id) return;
-      // Soft-delete: removeObject помечает removedAt; reconcile уберёт объект со схемы.
+      // Клавиша Delete — «выкопка» (soft-delete): объект остаётся в истории.
       useGardenStore.getState().removeObject(id);
       canvas.remove(activeObj);
       canvas.renderAll();
     };
+
+    // Пересадка из панели свойств: старая запись выкапывается, новая садится
+    // рядом с сохранением всех свойств. Добавляем fabric-объект вручную,
+    // помечая его как созданный на canvas (не пересоздавать при reconcile).
+    const onTransplantCommitted = (entry: GardenObject | null): void => {
+      if (!entry) return;
+      const marker = createFabricObjectFromEntry(entry);
+      markAsCreatedOnCanvas(marker);
+      canvas.add(marker);
+      canvas.setActiveObject(marker);
+      selectByObject(marker);
+      canvas.renderAll();
+    };
+    const transplantHandler = (event: Event): void => {
+      onTransplantCommitted((event as CustomEvent<GardenObject | null>).detail);
+    };
+    window.addEventListener('garden:transplanted', transplantHandler);
 
     const onKeyDownDelete = (event: KeyboardEvent): void => {
       const target = event.target as HTMLElement | null;
@@ -445,6 +465,7 @@ export default function GardenCanvas() {
       window.removeEventListener('keydown', handleEscape);
       window.removeEventListener('keydown', onKeyDownDelete);
       resizeObserver.disconnect();
+      window.removeEventListener('garden:transplanted', transplantHandler);
       canvas.dispose();
       if (fabricRef.current === canvas) fabricRef.current = null;
       setCanvas(null);

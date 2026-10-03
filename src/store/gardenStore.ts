@@ -32,8 +32,15 @@ interface GardenState {
 interface GardenActions {
   addObject: (obj: GardenObject) => void;
   updateObject: (id: string, updates: Partial<GardenObject>) => void;
+  /** Выкопка (soft-delete): removedAt = дата, объект исчезает со схемы после неё,
+   *  но остаётся в истории wayback-машины. */
   removeObject: (id: string) => void;
+  /** «В корзину» — полное уничтожение объекта из всех годов и из истории. */
+  destroyObject: (id: string) => void;
   relocateObject: (id: string, date: IsoDate) => void;
+  /** Пересадка одним действием: старая запись «выкапывается», новая садится
+   *  с сохранёнными свойствами (размер, тип, цикл, название). */
+  transplantObject: (id: string, date: IsoDate) => GardenObject | null;
   addEvent: (event: ActivityEvent) => void;
   setObjects: (objects: GardenObject[]) => void;
   setYear: (year: number) => void;
@@ -76,22 +83,26 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
 
   removeObject: (id: string): void => {
     const obj = get().objects.find((o) => o.id === id);
-    // Вместо физического удаления — «выкопка»: объект помечается removedAt
-    // и исчезает со схемы при просмотре дат после выкопки (wayback machine).
-    if (obj && !obj.removedAt) {
-      const date = todayIso();
-      set((state) => ({
-        objects: state.objects.map((o) => (o.id === id ? { ...o, removedAt: date } : o)),
-      }));
-      get().addEvent(makeEvent('removed', obj, `Удалён (выкопан): ${obj.name}, ${formatDateRu(date)}`, date));
-      return;
-    }
+    if (!obj) return;
+    // Выкопка (soft-delete): помечаем removedAt — объект исчезает со схемы
+    // после этой даты, но остаётся в истории (можно отматать год назад и
+    // увидеть, что он здесь рос). Если дата выкопки уже стоит — обновляем.
+    const date = todayIso();
+    set((state) => ({
+      objects: state.objects.map((o) => (o.id === id ? { ...o, removedAt: date } : o)),
+    }));
+    get().addEvent(makeEvent('removed', obj, `Выкопан: ${obj.name}, ${formatDateRu(date)} (остался в истории)`, date));
+  },
+
+  // «В корзину»: полное уничтожение объекта во всех временнóх срезах.
+  destroyObject: (id: string): void => {
+    const obj = get().objects.find((o) => o.id === id);
     set((state) => ({
       objects: state.objects.filter((o) => o.id !== id),
       selectedObjectId: state.selectedObjectId === id ? null : state.selectedObjectId,
     }));
     if (obj) {
-      get().addEvent(makeEvent('removed', obj, `Удалён безвозвратно: ${obj.name}`));
+      get().addEvent(makeEvent('removed', obj, `Уничтожен (в корзину): ${obj.name}`));
     }
   },
 
@@ -112,6 +123,41 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
         date,
       ),
     );
+  },
+
+  // Пересадка одним действием: старая запись «выкапывается» в date,
+  // новая сажается рядом с полным сохранением свойств (тип, название, размер,
+  // цикл, иконка) и датированной историей. Возвращает новую запись —
+  // вызывающий добавит её на canvas.
+  transplantObject: (id: string, date: IsoDate): GardenObject | null => {
+    const obj = get().objects.find((o) => o.id === id);
+    if (!obj) return null;
+    const now = new Date().toISOString();
+    const next: GardenObject = {
+      ...obj,
+      id: crypto.randomUUID(),
+      x: obj.x + 30,
+      y: obj.y + 30,
+      year: isoYear(date) ?? obj.year,
+      plantedAt: date,
+      removedAt: null,
+      history: {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    set((state) => ({
+      objects: state.objects.map((o) => (o.id === id ? { ...o, removedAt: date } : o)),
+    }));
+    get().addObject(next);
+    get().addEvent(
+      makeEvent(
+        'moved',
+        obj,
+        `Пересадка: ${obj.name} → новое место, посажен ${formatDateRu(date)}`,
+        date,
+      ),
+    );
+    return next;
   },
 
   addEvent: (event: ActivityEvent): void => {

@@ -30,6 +30,15 @@ export function isoYear(date: IsoDate | null | undefined): number | null {
   return Number.isFinite(y) ? y : null;
 }
 
+// Сдвиг ISO-даты на N дней (для стрелок «день назад/вперёд» wayback-машины).
+export function shiftIsoDate(date: IsoDate, days: number): IsoDate {
+  const d = new Date(`${date}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
 const MONTH_NAMES = [
   'янв', 'фев', 'мар', 'апр', 'мая', 'июн',
   'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',

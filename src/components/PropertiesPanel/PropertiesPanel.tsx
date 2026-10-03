@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { Move, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react';
+import { Move, Shovel, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react';
 import { useGardenStore } from '../../store/gardenStore';
 import type { PlantLifecycle, VarietyRating } from '../../types/garden';
 import { formatDateRu, todayIso } from '../../utils/markers';
@@ -38,8 +38,8 @@ export default function PropertiesPanel() {
   const currentYear = useGardenStore((s) => s.currentYear);
   const updateObject = useGardenStore((s) => s.updateObject);
   const removeObject = useGardenStore((s) => s.removeObject);
-  const relocateObject = useGardenStore((s) => s.relocateObject);
-  const addObject = useGardenStore((s) => s.addObject);
+  const destroyObject = useGardenStore((s) => s.destroyObject);
+  const transplantObject = useGardenStore((s) => s.transplantObject);
   const addEvent = useGardenStore((s) => s.addEvent);
   const viewDate = useGardenStore((s) => s.viewDate);
 
@@ -82,23 +82,19 @@ export default function PropertiesPanel() {
     addEvent(makeHarvestEvent(object.name, kg, total));
   };
 
-  // Пересадка: объект «выкапывается» сегодня и тут же создаётся копия на новом месте.
+  // Пересадка одним действием: старая запись «выкапывается» в выбранную дату,
+  // новая садится рядом со всеми сохранёнными свойствами (размер, тип, цикл).
+  // Canvas подписан на событие garden:transplanted — добавит fabric-объект копии.
   const relocateNow = (): void => {
     const date = viewDate ?? todayIso();
-    relocateObject(object.id, date);
-    const copy: typeof object = {
-      ...object,
-      id: crypto.randomUUID(),
-      x: object.x + 30,
-      y: object.y + 30,
-      year: currentYear,
-      plantedAt: date,
-      removedAt: null,
-      history: {},
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    addObject(copy);
+    const next = transplantObject(object.id, date);
+    window.dispatchEvent(new CustomEvent('garden:transplanted', { detail: next }));
+  };
+
+  // Выкопка: объект исчезает со схемы после сегодняшней даты, но остаётся
+  // в истории wayback-машины (можно отматать назад и увидеть его на месте).
+  const digOut = (): void => {
+    removeObject(object.id);
   };
 
   return (
@@ -238,15 +234,23 @@ export default function PropertiesPanel() {
           onClick={relocateNow}
           className="w-full h-9 flex items-center justify-center gap-2 rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-background transition-colors"
         >
-          <Move size={16} /> Пересадить (выкопать сегодня и посадить рядом)
+          <Move size={16} /> Пересадить (сохранит свойства на новом месте)
         </button>
 
         <button
           type="button"
-          onClick={() => removeObject(object.id)}
+          onClick={digOut}
+          className="w-full h-9 flex items-center justify-center gap-2 rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50 transition-colors"
+        >
+          <Shovel size={16} /> Выкопать (останется в истории по годам)
+        </button>
+
+        <button
+          type="button"
+          onClick={() => destroyObject(object.id)}
           className="w-full h-9 flex items-center justify-center gap-2 rounded-md border border-red-300 text-red-600 hover:bg-red-50 transition-colors"
         >
-          <Trash2 size={16} /> Удалить объект
+          <Trash2 size={16} /> В корзину (уничтожить во всех годах)
         </button>
       </div>
     </aside>

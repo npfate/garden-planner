@@ -43,6 +43,19 @@ export function findObjectByGardenId(canvas: FabricCanvas, id: string): FabricOb
   return canvas.getObjects().find((o) => getGardenId(o) === id);
 }
 
+// Runtime-флаг: fabric-объект создан «вручную» на canvas (грядка drag'ом,
+// метка кликом). Такие объекты не пересоздаём при reconcile — иначе сбрасывается
+// размер, увеличенный пользователем рамкой трансформации.
+const CREATED_FLAG_KEY = '__gardenCreatedOnCanvas';
+
+export function markAsCreatedOnCanvas(obj: FabricObject): void {
+  (obj as unknown as Record<string, unknown>)[CREATED_FLAG_KEY] = true;
+}
+
+export function wasCreatedOnCanvas(obj: FabricObject): boolean {
+  return (obj as unknown as Record<string, unknown>)[CREATED_FLAG_KEY] === true;
+}
+
 // Создание fabric-объекта для записи store.
 // Грядки — прямоугольники с их реальными размерами (рисуются drag'ом на canvas),
 // остальные типы — точки-метки фиксированного размера (MARKER_SIZE).
@@ -109,22 +122,26 @@ export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
       continue;
     }
 
-    // Метки (не-грядки) всегда имеют фиксированный размер MARKER_SIZE,
-    // поэтому сравнение с entry.width/height не применимо — обновляем только прозрачность.
-    const isBed = entry.type === 'bed';
-    const w = Math.max(existing.getScaledWidth(), 0);
-    const h = Math.max(existing.getScaledHeight(), 0);
-    const sizeMatches = !isBed || (Math.abs(w - entry.width) < 0.5 && Math.abs(h - entry.height) < 0.5);
+    existing.set({ opacity });
 
-    if (!sizeMatches) {
-      // размеры в store разошлись с canvas (например, загружен файл) —
-      // пересоздаём объект по актуальным данным
-      canvas.remove(existing);
-      const rect = createFabricObjectFromEntry(entry);
-      rect.set({ opacity });
-      canvas.add(rect);
-    } else {
-      existing.set({ opacity });
+    // Позиция могла измениться (drag на canvas, пересадка) — подтягиваем из store.
+    if (Math.abs((existing.left ?? 0) - entry.x) > 0.5 || Math.abs((existing.top ?? 0) - entry.y) > 0.5) {
+      existing.set({ left: entry.x, top: entry.y });
+    }
+
+    // Размер: объекты, созданные вручную на canvas (грядка drag'ом, метка кликом),
+    // никогда не пересоздаём — иначе сбрасывается размер, увеличенный рамкой
+    // трансформации (баг: «увеличил дерево → пересадил → отмотал год → квадратик»).
+    // Пересобираем только если размеры реально разошлись (загрузка .garden-файла).
+    if (!wasCreatedOnCanvas(existing)) {
+      const w = Math.max(existing.getScaledWidth(), 0);
+      const h = Math.max(existing.getScaledHeight(), 0);
+      if (Math.abs(w - entry.width) > 0.5 || Math.abs(h - entry.height) > 0.5) {
+        canvas.remove(existing);
+        const rect = createFabricObjectFromEntry(entry);
+        rect.set({ opacity });
+        canvas.add(rect);
+      }
     }
   }
 
