@@ -4,18 +4,18 @@ import { useEffect, useRef } from 'react';
 import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
 import type { ToolId } from '../../store/gardenStore';
 import type { GardenObject, GardenObjectType } from '../../types/garden';
-import { MARKER_SIZE, getMarkerColor } from '../../utils/markers';
+import { MARKER_SIZE } from '../../utils/markers';
 import {
+  createFabricObjectFromEntry,
   drawGrid,
   findObjectByGardenId,
+  reconcileObjectsWithStore,
   getGardenId,
   getSnapPoint,
   isBackgroundObject,
   loadBackgroundImage,
   setBackgroundSelectable,
-  setGardenId,
   syncFabricObjectToStore,
-  syncMarkersFromStore,
 } from './fabricSync';
 
 const ZOOM_FACTOR = 1.1;
@@ -151,7 +151,7 @@ export default function GardenCanvas() {
     fabricRef.current = canvas;
     setCanvas(canvas);
     drawGrid(canvas, useCanvasStore.getState().gridStep);
-    syncMarkersFromStore(canvas);
+    reconcileObjectsWithStore(canvas);
 
     const selectByObject = (obj: FabricObject | null | undefined): void => {
       const id = obj ? getGardenId(obj) : null;
@@ -209,17 +209,8 @@ export default function GardenCanvas() {
       const bedsCount = gs.objects.filter((o) => o.type === 'bed').length + 1;
       const entry = createGardenObjectEntry('bed', `Грядка ${bedsCount}`, gs.currentYear, left, top, width, height);
 
-      const rect = new Rect({
-        left,
-        top,
-        width,
-        height,
-        fill: 'rgba(76, 175, 80, 0.2)',
-        stroke: '#4CAF50',
-        strokeWidth: 2,
-        objectCaching: false,
-      });
-      setGardenId(rect, entry.id);
+      // fabric-объект строится из записи store — тот же путь, что и при загрузке проекта
+      const rect = createFabricObjectFromEntry(entry);
 
       gs.addObject(entry);
       canvas.add(rect);
@@ -246,18 +237,7 @@ export default function GardenCanvas() {
       );
       gs.addObject(entry);
 
-      const marker = new Rect({
-        left: entry.x,
-        top: entry.y,
-        width: MARKER_SIZE,
-        height: MARKER_SIZE,
-        fill: getMarkerColor('tree'),
-        stroke: '#FFFFFF',
-        strokeWidth: 1,
-        originX: 'center',
-        originY: 'center',
-      });
-      setGardenId(marker, entry.id);
+      const marker = createFabricObjectFromEntry(entry);
       canvas.add(marker);
       canvas.setActiveObject(marker);
       selectByObject(marker);
@@ -500,11 +480,11 @@ export default function GardenCanvas() {
     if (fabricRef.current) setBackgroundSelectable(fabricRef.current, !backgroundLocked);
   }, [backgroundLocked]);
 
-  // Полная перерисовка маркеров при смене года или загрузке объектов из файла
+  // Синхронизация слоя объектов при смене года или загрузке проекта (файл/автосейв)
   const currentYear = useGardenStore((s) => s.currentYear);
   const objectsCount = objects.length;
   useEffect(() => {
-    if (fabricRef.current) syncMarkersFromStore(fabricRef.current);
+    if (fabricRef.current) reconcileObjectsWithStore(fabricRef.current);
   }, [objectsCount, currentYear]);
 
   return (

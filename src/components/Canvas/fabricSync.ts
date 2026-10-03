@@ -42,52 +42,93 @@ export function findObjectByGardenId(canvas: FabricCanvas, id: string): FabricOb
   return canvas.getObjects().find((o) => getGardenId(o) === id);
 }
 
-export function createMarkerRect(entry: GardenObject): Rect {
+// Создание fabric-объекта для записи store.
+// Грядки — прямоугольники с их реальными размерами (рисуются drag'ом на canvas),
+// остальные типы — точки-метки фиксированного размера (MARKER_SIZE).
+export function createFabricObjectFromEntry(entry: GardenObject): Rect {
+  const isBed = entry.type === 'bed';
+  const width = isBed ? Math.max(entry.width, 1) : MARKER_SIZE;
+  const height = isBed ? Math.max(entry.height, 1) : MARKER_SIZE;
+
   const rect = new Rect({
     left: entry.x,
     top: entry.y,
-    width: MARKER_SIZE,
-    height: MARKER_SIZE,
-    fill: getMarkerColor(entry.type),
-    stroke: '#FFFFFF',
-    strokeWidth: 1,
-    originX: 'center',
-    originY: 'center',
+    width,
+    height,
+    originX: isBed ? 'left' : 'center',
+    originY: isBed ? 'top' : 'center',
     selectable: true,
     evented: true,
+    objectCaching: false,
+    ...(isBed
+      ? {
+          fill: 'rgba(76, 175, 80, 0.2)',
+          stroke: '#4CAF50',
+          strokeWidth: 2,
+        }
+      : {
+          fill: getMarkerColor(entry.type),
+          stroke: '#FFFFFF',
+          strokeWidth: 1,
+        }),
   });
+  if (entry.rotation) rect.set({ angle: entry.rotation });
   setGardenId(rect, entry.id);
   return rect;
 }
 
-// Полная синхронизация слоя объектов canvas со списком objects из store.
-// Вызывается при загрузке файла и переключении года.
-export function syncMarkersFromStore(canvas: FabricCanvas): void {
+// Полная перерисовка слоя объектов вызывается только при загрузке проекта
+// (автосейв/файл .garden) и смене года. Чтобы не затирать уже созданные
+// грядки-прямоугольники точками-метками, синхронизируем поштучно только
+// те объекты, у которых изменились год или размеры.
+export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
   const { objects, currentYear } = useGardenStore.getState();
+  const entriesById = new Map(objects.map((o) => [o.id, o]));
 
-  // Удаляем все garden-объекты (сетку/фон не трогаем)
+  // 1) Удаляем fabric-объекты, которых больше нет в store
   for (const obj of [...canvas.getObjects()]) {
-    if (getGardenId(obj)) canvas.remove(obj);
+    const id = getGardenId(obj);
+    if (id && !entriesById.has(id)) canvas.remove(obj);
   }
 
-  const visibleIds = new Set<string>();
-
+  // 2) Добавляем/обновляем объекты из store
   for (const entry of objects) {
     let opacity = 1;
-    if (entry.year > currentYear) continue; // будущие годы не показываем
-    if (entry.year < currentYear) opacity = 0.35; // прошлые — полупрозрачные
+    if (entry.year > currentYear) opacity = 0; // будущие годы скрыты
+    else if (entry.year < currentYear) opacity = 0.35; // прошлые — полупрозрачные
 
-    visibleIds.add(entry.id);
+    const existing = findObjectByGardenId(canvas, entry.id);
+    if (!existing) {
+      const rect = createFabricObjectFromEntry(entry);
+      rect.set({ opacity });
+      canvas.add(rect);
+      continue;
+    }
 
-    const rect = createMarkerRect(entry);
-    rect.set({ opacity });
-    canvas.add(rect);
+    const w = Math.max(existing.width ?? 0, 0);
+    const h = Math.max(existing.height ?? 0, 0);
+    const sizeMatches =
+      entry.type !== 'bed' ||
+      (Math.abs(w - entry.width) < 0.5 && Math.abs(h - entry.height) < 0.5);
+
+    if (!sizeMatches) {
+      // размеры в store разошлись с canvas (например, загружен файл) —
+      // пересоздаём объект по актуальным данным
+      canvas.remove(existing);
+      const rect = createFabricObjectFromEntry(entry);
+      rect.set({ opacity });
+      canvas.add(rect);
+    } else {
+      existing.set({ opacity });
+    }
   }
 
   // Сохраняем выделение, если объект всё ещё виден
   const selectedId = useGardenStore.getState().selectedObjectId;
-  if (selectedId && visibleIds.has(selectedId)) {
-    const obj = findObjectByGardenId(canvas, selectedId);
+  const visibleSelected =
+    selectedId && objects.find((o) => o.id === selectedId && o.year <= currentYear);
+  if (visibleSelected) {
+    const obj = findObjectByGardenId(canvas, selectedId as string);
     if (obj) canvas.setActiveObject(obj);
   } else if (selectedId) {
     useGardenStore.getState().selectObject(null);
