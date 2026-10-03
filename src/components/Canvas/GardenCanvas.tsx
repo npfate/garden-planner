@@ -1,47 +1,27 @@
-import { useEffect, useRef } from 'react';
-import { Canvas, FabricImage, Group, Line, Point, Rect } from 'fabric';
+import { Canvas, Point, Rect } from 'fabric';
 import type { TPointerEvent, TPointerEventInfo, FabricObject } from 'fabric';
-import { useGardenStore, type ToolId } from '../../store/gardenStore';
+import { useEffect, useRef } from 'react';
+import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
+import type { ToolId } from '../../store/gardenStore';
 import type { GardenObject, GardenObjectType } from '../../types/garden';
+import { MARKER_SIZE, getMarkerColor } from '../../utils/markers';
+import {
+  drawGrid,
+  findObjectByGardenId,
+  getGardenId,
+  getSnapPoint,
+  isBackgroundObject,
+  loadBackgroundImage,
+  setBackgroundSelectable,
+  setGardenId,
+  syncFabricObjectToStore,
+  syncMarkersFromStore,
+} from './fabricSync';
 
-const PIXELS_PER_METER = 50;
-const GRID_COLOR = '#E5E7EB';
 const ZOOM_FACTOR = 1.1;
 const MIN_SCALE = 10;
 const MAX_SCALE = 500;
-const MARKER_SIZE = 10;
 
-type CanvasAny = Record<string, unknown>;
-
-function sendObjectToBottom(canvas: Canvas, obj: Line | Group | FabricImage): void {
-  canvas.sendObjectToBack(obj);
-  canvas.renderAll();
-}
-
-function findBackground(canvas: Canvas): FabricImage | undefined {
-  return canvas.getObjects().find((o) => {
-    if (!(o instanceof FabricImage)) return false;
-    // @ts-expect-error custom runtime property
-    return o.__gardenBackground === true;
-  }) as FabricImage | undefined;
-}
-
-function removeBackground(canvas: Canvas): void {
-  const bg = findBackground(canvas);
-  if (bg) canvas.remove(bg);
-}
-
-function getSnapPoint(x: number, y: number): { x: number; y: number } {
-  const grid = useGardenStore.getState().gridStep;
-  const scale = useGardenStore.getState().scale;
-  if (!useGardenStore.getState().snapToGrid) return { x, y };
-
-  const effectiveStep = Math.max(1, grid * PIXELS_PER_METER * (scale / 100));
-  return {
-    x: Math.round(x / effectiveStep) * effectiveStep,
-    y: Math.round(y / effectiveStep) * effectiveStep,
-  };
-}
 
 function createGardenObjectEntry(
   type: GardenObjectType,
@@ -65,170 +45,41 @@ function createGardenObjectEntry(
     height,
     parentId: null,
     varieties: [],
-    history: {
-      [year]: {
-        harvest: 0,
-      },
-    },
+    history: { [year]: { harvest: 0 } },
     customIcon: customIcon ?? null,
     createdAt: now,
     updatedAt: now,
   };
 }
 
-export async function loadBackgroundImage(canvas: Canvas, url: string): Promise<void> {
-  const img = await FabricImage.fromURL(url, {
-    crossOrigin: 'anonymous',
-  });
-  removeBackground(canvas);
-  const cw = canvas.getWidth();
-  const ch = canvas.getHeight();
-  const iw = img.width ?? cw;
-  const ih = img.height ?? ch;
-  const scale = Math.min(cw / iw, ch / ih, 1);
-  img.set({
-    left: (cw - iw * scale) / 2,
-    top: (ch - ih * scale) / 2,
-    scaleX: scale,
-    scaleY: scale,
-    selectable: true,
-    evented: true,
-    hasControls: true,
-  });
-  // @ts-expect-error custom runtime flag
-  img.__gardenBackground = true;
-  canvas.add(img);
-  canvas.sendObjectToBack(img);
-  canvas.renderAll();
-}
-
-export function setBackgroundSelectable(canvas: Canvas, selectable: boolean): void {
-  const bg = findBackground(canvas);
-  if (!bg) return;
-  bg.set({
-    selectable,
-    evented: selectable,
-    hasControls: selectable,
-    hoverCursor: selectable ? 'move' : 'default',
-  });
-  canvas.renderAll();
-}
-
-function drawGrid(canvas: Canvas, gridStepMeters: number): void {
-  const width = canvas.getWidth();
-  const height = canvas.getHeight();
-  const step = Math.max(1, gridStepMeters * PIXELS_PER_METER);
-
-  const oldGrid = canvas.getObjects().find((o) => {
-    // @ts-expect-error custom runtime property
-    return o.__gardenGrid === true;
-  }) as Group | undefined;
-  if (oldGrid) {
-    canvas.remove(oldGrid);
-  }
-
-  const lines: Line[] = [];
-
-  for (let x = 0; x <= width; x += step) {
-    lines.push(
-      new Line([x, 0, x, height], {
-        stroke: GRID_COLOR,
-        strokeWidth: 1,
-        selectable: false,
-        evented: false,
-        excludeFromExport: false,
-      }),
-    );
-  }
-
-  for (let y = 0; y <= height; y += step) {
-    lines.push(
-      new Line([0, y, width, y], {
-        stroke: GRID_COLOR,
-        strokeWidth: 1,
-        selectable: false,
-        evented: false,
-        excludeFromExport: false,
-      }),
-    );
-  }
-
-  const gridGroup = new Group(lines, {
-    selectable: false,
-    evented: false,
-    hoverCursor: 'default',
-  });
-  // @ts-expect-error custom runtime flag
-  gridGroup.__gardenGrid = true;
-
-  canvas.add(gridGroup);
-  sendObjectToBottom(canvas, gridGroup);
-
-  const bg = findBackground(canvas);
-  if (bg) {
-    sendObjectToBottom(canvas, bg);
-  }
-}
-
 function applyZoom(canvas: Canvas, newScalePercent: number, centerPoint?: Point): void {
   const clamped = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScalePercent));
-  const zoom = clamped / 100;
   const point = centerPoint ?? new Point(canvas.getWidth() / 2, canvas.getHeight() / 2);
-  canvas.zoomToPoint(point, zoom);
+  canvas.zoomToPoint(point, clamped / 100);
   canvas.renderAll();
 }
 
-function syncFabricObjectToStore(canvas: Canvas): void {
-  const activeObject = canvas.getActiveObject();
-  if (!activeObject) return;
-
-  const objectId = activeObject.get('gardenObjectId') ?? activeObject.get('objectId');
-  if (!objectId || typeof objectId !== 'string') return;
-
-  const width = activeObject.getScaledWidth
-    ? activeObject.getScaledWidth()
-    : activeObject.width ?? 0;
-  const height = activeObject.getScaledHeight
-    ? activeObject.getScaledHeight()
-    : activeObject.height ?? 0;
-
-  useGardenStore.getState().updateObject(objectId, {
-    x: activeObject.left ?? 0,
-    y: activeObject.top ?? 0,
-    width,
-    height,
-    rotation: activeObject.angle ?? 0,
-    updatedAt: new Date().toISOString(),
-  });
-}
-
-function createBedPreview(start: Point, end: Point): Rect {
-  const left = Math.min(start.x, end.x);
-  const top = Math.min(start.y, end.y);
-  const width = Math.max(Math.abs(end.x - start.x), 1);
-  const height = Math.max(Math.abs(end.y - start.y), 1);
-
-  return new Rect({
-    left,
-    top,
-    width,
-    height,
-    fill: 'rgba(76, 175, 80, 0.2)',
-    stroke: '#4CAF50',
-    strokeWidth: 2,
-    selectable: false,
-    evented: false,
-    hasControls: false,
-    hasBorders: false,
-    objectCaching: false,
-    originX: 'left',
-    originY: 'top',
-  });
+function cursorsForTool(canvas: Canvas, tool: ToolId, spacePressed: boolean): void {
+  if (spacePressed || tool === 'pan') {
+    canvas.defaultCursor = 'grab';
+    canvas.hoverCursor = 'grab';
+    canvas.moveCursor = 'grab';
+    return;
+  }
+  if (tool === 'bed' || tool === 'tree') {
+    canvas.defaultCursor = 'crosshair';
+    canvas.hoverCursor = 'crosshair';
+    canvas.moveCursor = 'crosshair';
+    return;
+  }
+  canvas.defaultCursor = 'default';
+  canvas.hoverCursor = 'move';
+  canvas.moveCursor = 'move';
 }
 
 export default function GardenCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasElRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const activeToolRef = useRef<ToolId>('select');
   const bedDraftRef = useRef<{ start: Point; preview: Rect | null } | null>(null);
@@ -237,71 +88,39 @@ export default function GardenCanvas() {
   const lastScreenPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const setCanvas = useGardenStore((s) => s.setCanvas);
-  const setScale = useGardenStore((s) => s.setScale);
-  const gridStep = useGardenStore((s) => s.gridStep);
-  const scale = useGardenStore((s) => s.scale);
-  const activeTool = useGardenStore((s) => s.activeTool);
-  const backgroundImage = useGardenStore((s) => s.backgroundImage);
-  const backgroundLocked = useGardenStore((s) => s.backgroundLocked);
-  const selectObject = useGardenStore((s) => s.selectObject);
+  const objects = useGardenStore((s) => s.objects);
+  const scale = useCanvasStore((s) => s.scale);
+  const gridStep = useCanvasStore((s) => s.gridStep);
+  const activeTool = useCanvasStore((s) => s.activeTool);
+  const backgroundImage = useCanvasStore((s) => s.backgroundImage);
+  const backgroundLocked = useCanvasStore((s) => s.backgroundLocked);
 
   useEffect(() => {
     activeToolRef.current = activeTool;
   }, [activeTool]);
 
-  // ----- Глобальные обработчики Пробела -----
+  // Пробел — временный режим панорамирования
   useEffect(() => {
-    const setCursorIdle = () => {
-      const c = fabricRef.current;
-      if (!c) return;
-      const tool = useGardenStore.getState().activeTool;
-      if (tool === 'bed') {
-        c.defaultCursor = 'crosshair';
-        c.hoverCursor = 'crosshair';
-        return;
-      }
-      if (tool === 'pan') {
-        c.defaultCursor = 'grab';
-        c.hoverCursor = 'grab';
-        c.moveCursor = 'grab';
-        return;
-      }
-      // select
-      c.defaultCursor = 'default';
-      c.hoverCursor = 'move';
-      c.moveCursor = 'move';
-    };
-
     const onKeyDown = (e: KeyboardEvent): void => {
       const target = e.target as HTMLElement | null;
       const isEditable =
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          Boolean(target.isContentEditable));
+        !!target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || Boolean(target.isContentEditable));
       if (e.code !== 'Space' || e.repeat || isEditable) return;
       e.preventDefault();
       if (isSpacePressedRef.current) return;
       isSpacePressedRef.current = true;
-      const c = fabricRef.current as CanvasAny | null;
-      if (c && c.isDragging !== true) {
-        setCursorIdle();
-        const fc = fabricRef.current;
-        if (fc) {
-          fc.defaultCursor = 'grab';
-          fc.hoverCursor = 'grab';
-          fc.moveCursor = 'grab';
-        }
-      }
+      const c = fabricRef.current;
+      if (c && !isPanningRef.current) cursorsForTool(c, 'pan', true);
     };
 
     const onKeyUp = (e: KeyboardEvent): void => {
       if (e.code !== 'Space') return;
       e.preventDefault();
       isSpacePressedRef.current = false;
-      const c = fabricRef.current as CanvasAny | null;
-      if (!c || c.isDragging !== true) {
-        setCursorIdle();
+      const c = fabricRef.current;
+      if (c && !isPanningRef.current) {
+        cursorsForTool(c, useCanvasStore.getState().activeTool, false);
       }
     };
 
@@ -313,25 +132,31 @@ export default function GardenCanvas() {
     };
   }, []);
 
+  // Инициализация canvas и обработчиков событий мыши
   useEffect(() => {
-    if (!canvasRef.current || !containerRef.current) return;
+    const el = canvasElRef.current;
+    const container = containerRef.current;
+    if (!el || !container) return;
 
-    const { clientWidth, clientHeight } = containerRef.current;
-
-    const canvas = new Canvas(canvasRef.current, {
-      width: clientWidth,
-      height: clientHeight,
+    const canvas = new Canvas(el, {
+      width: container.clientWidth,
+      height: container.clientHeight,
       backgroundColor: '#F5F7FA',
       selection: true,
       preserveObjectStacking: true,
-      allowTouchScrolling: true,
       fireRightClick: true,
       stopContextMenu: true,
     });
 
     fabricRef.current = canvas;
     setCanvas(canvas);
-    drawGrid(canvas, useGardenStore.getState().gridStep);
+    drawGrid(canvas, useCanvasStore.getState().gridStep);
+    syncMarkersFromStore(canvas);
+
+    const selectByObject = (obj: FabricObject | null | undefined): void => {
+      const id = obj ? getGardenId(obj) : null;
+      useGardenStore.getState().selectObject(id);
+    };
 
     const onWheel = (opt: TPointerEventInfo<TPointerEvent>): void => {
       const evt = opt.e;
@@ -341,62 +166,48 @@ export default function GardenCanvas() {
       evt.stopPropagation();
 
       const wheel = evt as unknown as WheelEvent;
-      const currentScale = useGardenStore.getState().scale;
+      const currentScale = useCanvasStore.getState().scale;
       const factor = wheel.deltaY < 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
       const next = Math.round(currentScale * factor);
-      const clamped = Math.max(MIN_SCALE, Math.min(MAX_SCALE, next));
-      const target = (wheel.currentTarget ?? canvas.lowerCanvasEl) as HTMLElement | null;
-      const rect = target?.getBoundingClientRect();
-      const pointer = new Point(
-        rect ? wheel.clientX - rect.left : wheel.offsetX ?? 0,
-        rect ? wheel.clientY - rect.top : wheel.offsetY ?? 0,
-      );
-      applyZoom(canvas, clamped, pointer);
-      setScale(clamped);
+      const rect = canvas.upperCanvasEl.getBoundingClientRect();
+      const pointer = new Point(wheel.clientX - rect.left, wheel.clientY - rect.top);
+      applyZoom(canvas, next, pointer);
+      useCanvasStore.getState().setScale(Math.max(MIN_SCALE, Math.min(MAX_SCALE, next)));
     };
 
     const onSelectionChanged = (): void => {
       const activeObj = canvas.getActiveObject();
       if (!activeObj) {
-        selectObject(null);
+        selectByObject(null);
         return;
       }
-      // Если выделена группа, берем первый объект для простоты
-      const targetObj =
-        activeObj.type === 'activeSelection'
-          ? // @ts-expect-error ActiveSelection has getObjects
-            (activeObj.getObjects() as FabricObject[])[0]
-          : activeObj;
-
-      const objectId =
-        targetObj &&
-        ((targetObj.get('gardenObjectId') as unknown) ??
-          (targetObj.get('objectId') as unknown));
-      selectObject(typeof objectId === 'string' ? objectId : null);
-    };
-
-    const onSelectionCleared = (): void => {
-      selectObject(null);
+      if (activeObj.type === 'activeSelection') {
+        // при мультивыделении берём первый объект панели свойств
+        const first = (activeObj as unknown as { getObjects: () => FabricObject[] }).getObjects()[0];
+        selectByObject(first);
+        return;
+      }
+      selectByObject(activeObj);
     };
 
     const onObjectModified = (): void => {
-      syncFabricObjectToStore(canvas);
-      onSelectionChanged(); // Обновляем store при перемещении/масштабировании
+      const activeObj = canvas.getActiveObject();
+      if (activeObj) syncFabricObjectToStore(activeObj);
     };
 
     const finalizeBedDraft = (point: Point): void => {
       const draft = bedDraftRef.current;
       if (!draft) return;
+      if (draft.preview) canvas.remove(draft.preview);
 
-      if (draft.preview) {
-        canvas.remove(draft.preview);
-      }
+      const left = Math.min(draft.start.x, point.x);
+      const top = Math.min(draft.start.y, point.y);
+      const width = Math.max(Math.abs(point.x - draft.start.x), 1);
+      const height = Math.max(Math.abs(point.y - draft.start.y), 1);
 
-      const start = draft.start;
-      const left = Math.min(start.x, point.x);
-      const top = Math.min(start.y, point.y);
-      const width = Math.max(Math.abs(point.x - start.x), 1);
-      const height = Math.max(Math.abs(point.y - start.y), 1);
+      const gs = useGardenStore.getState();
+      const bedsCount = gs.objects.filter((o) => o.type === 'bed').length + 1;
+      const entry = createGardenObjectEntry('bed', `Грядка ${bedsCount}`, gs.currentYear, left, top, width, height);
 
       const rect = new Rect({
         left,
@@ -406,185 +217,194 @@ export default function GardenCanvas() {
         fill: 'rgba(76, 175, 80, 0.2)',
         stroke: '#4CAF50',
         strokeWidth: 2,
-        selectable: true,
-        evented: true,
-        hasControls: true,
-        hasBorders: true,
         objectCaching: false,
       });
+      setGardenId(rect, entry.id);
 
-      const id = crypto.randomUUID();
-      const currentYear = useGardenStore.getState().currentYear;
-      const existingBeds =
-        useGardenStore
-          .getState()
-          .objects.filter((item) => item.type === 'bed')
-          .length + 1;
-      const name = `Грядка ${existingBeds}`;
-
-      const entry = createGardenObjectEntry('bed', name, currentYear, left, top, width, height);
-      entry.id = id;
-
-      rect.set('gardenObjectId', id);
-      rect.set('objectType', 'bed');
-      rect.set('name', name);
-      rect.set('year', currentYear);
-
+      gs.addObject(entry);
       canvas.add(rect);
-
-      // 1. Добавляем в store
-      useGardenStore.getState().addObject(entry);
-
-      // 2. Делаем активным в canvas
       canvas.setActiveObject(rect);
-
-      // 3. Синхронизируем выделение в store
-      onSelectionChanged();
-
+      selectByObject(rect);
       canvas.renderAll();
 
-      // 4. Переключаем инструмент (это запустит useEffect, который восстановит выделение)
-      useGardenStore.getState().setActiveTool('select');
-      activeToolRef.current = 'select';
+      useCanvasStore.getState().setActiveTool('select');
       bedDraftRef.current = null;
     };
 
-    const handleMouseDown = (event: TPointerEventInfo<TPointerEvent>): void => {
-      const currentTool = activeToolRef.current;
-      const canvasAny = canvas as unknown as CanvasAny;
+    const placeTreeMarker = (pointer: Point): void => {
+      const snapped = getSnapPoint(pointer.x, pointer.y);
+      const gs = useGardenStore.getState();
+      const entry = createGardenObjectEntry(
+        'tree',
+        'Яблоня',
+        gs.currentYear,
+        snapped.x,
+        snapped.y,
+        MARKER_SIZE,
+        MARKER_SIZE,
+        '🍎',
+      );
+      gs.addObject(entry);
 
+      const marker = new Rect({
+        left: entry.x,
+        top: entry.y,
+        width: MARKER_SIZE,
+        height: MARKER_SIZE,
+        fill: getMarkerColor('tree'),
+        stroke: '#FFFFFF',
+        strokeWidth: 1,
+        originX: 'center',
+        originY: 'center',
+      });
+      setGardenId(marker, entry.id);
+      canvas.add(marker);
+      canvas.setActiveObject(marker);
+      selectByObject(marker);
+      canvas.renderAll();
+      useCanvasStore.getState().setActiveTool('select');
+    };
+
+    const handleMouseDown = (event: TPointerEventInfo<TPointerEvent>): void => {
+      const tool = activeToolRef.current;
       const raw = event.e as PointerEvent;
       const mouseButton = typeof raw.button === 'number' ? raw.button : 0;
-      // 0 - ЛКМ, 1 - средняя (колесо), 2 - правая
       const isMiddle = mouseButton === 1;
       const isSpaceAndLeft = mouseButton === 0 && isSpacePressedRef.current;
-      const isPanToolAndLeft = mouseButton === 0 && currentTool === 'pan';
+      const isPanToolAndLeft = mouseButton === 0 && tool === 'pan';
 
-      // --- Pan начало: ХОТЯ БЫ ОДНО из условий ---
       if (isMiddle || isSpaceAndLeft || isPanToolAndLeft) {
         if (isMiddle) raw.preventDefault();
-        const rect = (canvas.upperCanvasEl as HTMLCanvasElement).getBoundingClientRect();
+        const rect = canvas.upperCanvasEl.getBoundingClientRect();
         const sx = raw.clientX - rect.left;
         const sy = raw.clientY - rect.top;
         isPanningRef.current = true;
-        canvasAny.isDragging = true;
         lastScreenPosRef.current = { x: sx, y: sy };
-        canvasAny.lastPosX = sx;
-        canvasAny.lastPosY = sy;
-        // НЕ сбрасываем выделение, чтобы не сбросить случайно
         canvas.defaultCursor = 'grabbing';
         canvas.hoverCursor = 'grabbing';
         canvas.moveCursor = 'grabbing';
-        return; // ← Pan приоритет: не запускаем select/bed логику
+        return;
       }
 
-      if (currentTool === 'select') {
-        // Если кликнули по пустому месту - снимаем выделение
+      if (tool === 'select') {
         const target = canvas.findTarget(event.e) as unknown as FabricObject | null;
         if (!target) {
           canvas.discardActiveObject();
           canvas.renderAll();
-          selectObject(null);
+          selectByObject(null);
         }
-        // Если кликнули по объекту, Fabric.js сам обработает выделение,
-        // а onSelectionChanged обновит store.
         return;
       }
 
-      if (currentTool === 'bed') {
+      if (tool === 'bed') {
         const pointer = canvas.getScenePoint(event.e);
         const snapped = getSnapPoint(pointer.x, pointer.y);
         const point = new Point(snapped.x, snapped.y);
 
         if (!bedDraftRef.current) {
-          const preview = createBedPreview(point, point);
+          const preview = new Rect({
+            left: point.x,
+            top: point.y,
+            width: 1,
+            height: 1,
+            fill: 'rgba(76, 175, 80, 0.2)',
+            stroke: '#4CAF50',
+            strokeWidth: 2,
+            selectable: false,
+            evented: false,
+            originX: 'left',
+            originY: 'top',
+          });
           bedDraftRef.current = { start: point, preview };
           canvas.add(preview);
           canvas.renderAll();
           return;
         }
-
         finalizeBedDraft(point);
+        return;
+      }
+
+      if (tool === 'tree') {
+        placeTreeMarker(canvas.getScenePoint(event.e));
       }
     };
 
     const handleMouseMove = (event: TPointerEventInfo<TPointerEvent>): void => {
-      const canvasAny = canvas as unknown as CanvasAny;
-
-      // --- Pan: двигаем схему ---
-      if (isPanningRef.current || canvasAny.isDragging === true) {
+      if (isPanningRef.current) {
         const raw = event.e as PointerEvent;
-        const rect = (canvas.upperCanvasEl as HTMLCanvasElement).getBoundingClientRect();
+        const rect = canvas.upperCanvasEl.getBoundingClientRect();
         const sx = raw.clientX - rect.left;
         const sy = raw.clientY - rect.top;
         const last = lastScreenPosRef.current ?? { x: sx, y: sy };
-        const dx = sx - last.x;
-        const dy = sy - last.y;
-        canvas.relativePan(new Point(dx, dy));
+        canvas.relativePan(new Point(sx - last.x, sy - last.y));
         lastScreenPosRef.current = { x: sx, y: sy };
-        canvasAny.lastPosX = sx;
-        canvasAny.lastPosY = sy;
         canvas.renderAll();
-        return; // ← не рисуем превью грядки и т.д.
+        return;
       }
 
       if (activeToolRef.current !== 'bed' || !bedDraftRef.current) return;
 
       const pointer = canvas.getScenePoint(event.e);
       const snapped = getSnapPoint(pointer.x, pointer.y);
-      const nextPoint = new Point(snapped.x, snapped.y);
       const draft = bedDraftRef.current;
-      const nextPreview = createBedPreview(draft.start, nextPoint);
-
-      if (draft.preview) {
-        canvas.remove(draft.preview);
-      }
-
-      draft.preview = nextPreview;
-      canvas.add(nextPreview);
+      const left = Math.min(draft.start.x, snapped.x);
+      const top = Math.min(draft.start.y, snapped.y);
+      draft.preview?.set({
+        left,
+        top,
+        width: Math.max(Math.abs(snapped.x - draft.start.x), 1),
+        height: Math.max(Math.abs(snapped.y - draft.start.y), 1),
+      });
       canvas.renderAll();
+    };
+
+    const handleMouseUp = (): void => {
+      isPanningRef.current = false;
+      lastScreenPosRef.current = null;
+      cursorsForTool(canvas, useCanvasStore.getState().activeTool, isSpacePressedRef.current);
     };
 
     const handleDoubleClick = (): void => {
       if (activeToolRef.current === 'bed' && bedDraftRef.current) {
-        finalizeBedDraft(bedDraftRef.current.start);
+        if (bedDraftRef.current.preview) canvas.remove(bedDraftRef.current.preview);
+        bedDraftRef.current = null;
+        canvas.renderAll();
       }
     };
 
-    const handleMouseUp = (): void => {
-      const canvasAny = canvas as unknown as CanvasAny;
-      isPanningRef.current = false;
-      canvasAny.isDragging = false;
-      lastScreenPosRef.current = null;
-      canvasAny.lastPosX = undefined;
-      canvasAny.lastPosY = undefined;
-
-      // восстанавливаем курсор в зависимости от пробела и активного инструмента
-      const tool = useGardenStore.getState().activeTool;
-      if (isSpacePressedRef.current) {
-        canvas.defaultCursor = 'grab';
-        canvas.hoverCursor = 'grab';
-        canvas.moveCursor = 'grab';
-        return;
+    const handleEscape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      if (activeToolRef.current === 'bed' && bedDraftRef.current) {
+        if (bedDraftRef.current.preview) canvas.remove(bedDraftRef.current.preview);
+        bedDraftRef.current = null;
+        canvas.renderAll();
+      } else if (activeToolRef.current === 'tree') {
+        useCanvasStore.getState().setActiveTool('select');
       }
-      if (tool === 'bed') {
-        canvas.defaultCursor = 'crosshair';
-        canvas.hoverCursor = 'crosshair';
-        return;
-      }
-      if (tool === 'pan') {
-        canvas.defaultCursor = 'grab';
-        canvas.hoverCursor = 'grab';
-        canvas.moveCursor = 'grab';
-        return;
-      }
-      // select
-      canvas.defaultCursor = 'default';
-      canvas.hoverCursor = 'move';
-      canvas.moveCursor = 'move';
     };
 
-    // --- Привязка событий ---
+    const deleteSelected = (): void => {
+      const activeObj = canvas.getActiveObject();
+      if (!activeObj) return;
+      const id = getGardenId(activeObj);
+      if (!id) return;
+      canvas.remove(activeObj);
+      canvas.renderAll();
+      useGardenStore.getState().removeObject(id);
+    };
+
+    const onKeyDownDelete = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null;
+      const isEditable =
+        !!target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || Boolean(target.isContentEditable));
+      if (isEditable) return;
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        deleteSelected();
+      }
+    };
+
     canvas.on('mouse:wheel', onWheel);
     canvas.on('mouse:down', handleMouseDown);
     canvas.on('mouse:move', handleMouseMove);
@@ -592,23 +412,21 @@ export default function GardenCanvas() {
     canvas.on('mouse:dblclick', handleDoubleClick);
     canvas.on('selection:created', onSelectionChanged);
     canvas.on('selection:updated', onSelectionChanged);
-    canvas.on('selection:cleared', onSelectionCleared);
+    canvas.on('selection:cleared', () => selectByObject(null));
     canvas.on('object:modified', onObjectModified);
-    canvas.on('object:moving', onObjectModified);
-    canvas.on('object:scaling', onObjectModified);
-    canvas.on('object:rotating', onObjectModified);
+
+    window.addEventListener('keydown', handleEscape);
+    window.addEventListener('keydown', onKeyDownDelete);
 
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (!entry || !fabricRef.current) return;
+      if (!entry) return;
       const { width, height } = entry.contentRect;
-      fabricRef.current.setDimensions({ width, height });
-      drawGrid(fabricRef.current, useGardenStore.getState().gridStep);
+      canvas.setDimensions({ width, height });
+      drawGrid(canvas, useCanvasStore.getState().gridStep);
     });
+    resizeObserver.observe(container);
 
-    resizeObserver.observe(containerRef.current);
-
-    // --- Очистка ---
     return () => {
       canvas.off('mouse:wheel', onWheel);
       canvas.off('mouse:down', handleMouseDown);
@@ -617,150 +435,81 @@ export default function GardenCanvas() {
       canvas.off('mouse:dblclick', handleDoubleClick);
       canvas.off('selection:created', onSelectionChanged);
       canvas.off('selection:updated', onSelectionChanged);
-      canvas.off('selection:cleared', onSelectionCleared);
+      canvas.off('selection:cleared');
       canvas.off('object:modified', onObjectModified);
-      canvas.off('object:moving', onObjectModified);
-      canvas.off('object:scaling', onObjectModified);
-      canvas.off('object:rotating', onObjectModified);
-
+      window.removeEventListener('keydown', handleEscape);
+      window.removeEventListener('keydown', onKeyDownDelete);
       resizeObserver.disconnect();
-      if (fabricRef.current) {
-        fabricRef.current.dispose();
-        fabricRef.current = null;
-      }
+      canvas.dispose();
+      if (fabricRef.current === canvas) fabricRef.current = null;
       setCanvas(null);
     };
-  }, [setCanvas, setScale, selectObject]);
+  }, [setCanvas]);
 
+  // Зум/сетка/инструменты/фон — реакции на изменения canvas-домена
   useEffect(() => {
-    if (!fabricRef.current) return;
-    applyZoom(fabricRef.current, scale);
+    if (fabricRef.current) applyZoom(fabricRef.current, scale);
   }, [scale]);
 
   useEffect(() => {
-    if (!fabricRef.current) return;
-    drawGrid(fabricRef.current, gridStep);
+    if (fabricRef.current) drawGrid(fabricRef.current, gridStep);
   }, [gridStep]);
 
-  // --- Переключение инструментов: курсоры, выделяемость объектов ---
   useEffect(() => {
-    if (!fabricRef.current) return;
-
     const canvas = fabricRef.current;
+    if (!canvas) return;
 
-    // 1. Общие настройки по инструментам
-    if (activeTool === 'bed') {
-      canvas.selection = false;
-      canvas.defaultCursor = 'crosshair';
-      canvas.hoverCursor = 'crosshair';
-      canvas.moveCursor = 'crosshair';
-    } else if (activeTool === 'pan') {
-      canvas.selection = false;
-      canvas.defaultCursor = 'grab';
-      canvas.hoverCursor = 'grab';
-      canvas.moveCursor = 'grab';
-    } else {
-      // select
-      canvas.selection = true;
-      if (isSpacePressedRef.current) {
-        canvas.defaultCursor = 'grab';
-        canvas.hoverCursor = 'grab';
-        canvas.moveCursor = 'grab';
-      } else {
-        canvas.defaultCursor = 'default';
-        canvas.hoverCursor = 'move';
-        canvas.moveCursor = 'move';
+    canvas.selection = activeTool === 'select';
+    cursorsForTool(canvas, activeTool, isSpacePressedRef.current);
+
+    if (activeTool === 'bed' || activeTool === 'tree' || activeTool === 'pan') {
+      if (bedDraftRef.current?.preview) {
+        canvas.remove(bedDraftRef.current.preview);
+        bedDraftRef.current = null;
       }
-    }
-
-    // 2. Настройка selectable/evented на объектах (сетка/фон пропускаем)
-    canvas.forEachObject((obj) => {
-      // @ts-expect-error custom runtime property
-      if (obj.__gardenGrid || obj.__gardenBackground) return;
-
-      let isSelectable: boolean;
-      if (activeTool === 'bed' || activeTool === 'pan') {
-        isSelectable = false;
-      } else {
-        isSelectable = true;
-      }
-      obj.set({
-        selectable: isSelectable,
-        evented: isSelectable,
-        hasControls: isSelectable,
-        hasBorders: isSelectable,
-      });
-    });
-
-    // 3. При pan/bed: сбрасываем active object, если есть
-    if (activeTool === 'bed' || activeTool === 'pan') {
       canvas.discardActiveObject();
       useGardenStore.getState().selectObject(null);
     } else {
-      // select: восстанавливаем выделение
       const selectedId = useGardenStore.getState().selectedObjectId;
       if (selectedId) {
-        const obj = canvas
-          .getObjects()
-          .find(
-            (o) =>
-              (o.get('gardenObjectId') ?? o.get('objectId')) === selectedId,
-          );
-        if (obj) {
-          canvas.setActiveObject(obj);
-        }
+        const obj = findObjectByGardenId(canvas, selectedId);
+        if (obj) canvas.setActiveObject(obj);
       }
     }
-
     canvas.renderAll();
   }, [activeTool]);
 
   useEffect(() => {
-    if (!fabricRef.current) return;
-
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (
-        event.key !== 'Escape' ||
-        activeToolRef.current !== 'bed' ||
-        !bedDraftRef.current
-      ) {
-        return;
-      }
-
-      const preview = bedDraftRef.current.preview;
-      if (preview) {
-        fabricRef.current?.remove(preview);
-      }
-      bedDraftRef.current = null;
-      fabricRef.current?.renderAll();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTool]);
-
-  useEffect(() => {
-    if (!fabricRef.current) return;
+    const canvas = fabricRef.current;
+    if (!canvas) return;
     if (!backgroundImage) {
-      removeBackground(fabricRef.current);
-      fabricRef.current.renderAll();
+      const bg = canvas.getObjects().find(isBackgroundObject);
+      if (bg) {
+        canvas.remove(bg);
+        canvas.renderAll();
+      }
       return;
     }
-    void loadBackgroundImage(fabricRef.current, backgroundImage).then(() => {
+    void loadBackgroundImage(canvas, backgroundImage).then(() => {
       if (!fabricRef.current) return;
-      const locked = useGardenStore.getState().backgroundLocked;
-      setBackgroundSelectable(fabricRef.current, !locked);
+      setBackgroundSelectable(fabricRef.current, !useCanvasStore.getState().backgroundLocked);
     });
   }, [backgroundImage]);
 
   useEffect(() => {
-    if (!fabricRef.current) return;
-    setBackgroundSelectable(fabricRef.current, !backgroundLocked);
+    if (fabricRef.current) setBackgroundSelectable(fabricRef.current, !backgroundLocked);
   }, [backgroundLocked]);
+
+  // Полная перерисовка маркеров при смене года или загрузке объектов из файла
+  const currentYear = useGardenStore((s) => s.currentYear);
+  const objectsCount = objects.length;
+  useEffect(() => {
+    if (fabricRef.current) syncMarkersFromStore(fabricRef.current);
+  }, [objectsCount, currentYear]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-background">
-      <canvas ref={canvasRef} />
+      <canvas ref={canvasElRef} />
     </div>
   );
 }
