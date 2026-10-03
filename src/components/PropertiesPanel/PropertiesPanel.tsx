@@ -1,7 +1,14 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react';
+import { Move, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react';
 import { useGardenStore } from '../../store/gardenStore';
-import type { VarietyRating } from '../../types/garden';
+import type { PlantLifecycle, VarietyRating } from '../../types/garden';
+import { formatDateRu, todayIso } from '../../utils/markers';
+import { makeEvent } from '../../utils/wayback';
+
+function makeHarvestEvent(name: string, kg: number, total: number) {
+  return makeEvent('harvest', { id: '', name }, `Собран урожай ${name}: +${kg} кг (всего за год ${total} кг)`);
+}
 
 interface FieldRowProps {
   label: string;
@@ -26,10 +33,15 @@ const readonlyClass =
   'w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-text-secondary';
 
 export default function PropertiesPanel() {
+  const [harvestInput, setHarvestInput] = useState('');
   const object = useGardenStore((s) => s.objects.find((item) => item.id === s.selectedObjectId) ?? null);
   const currentYear = useGardenStore((s) => s.currentYear);
   const updateObject = useGardenStore((s) => s.updateObject);
   const removeObject = useGardenStore((s) => s.removeObject);
+  const relocateObject = useGardenStore((s) => s.relocateObject);
+  const addObject = useGardenStore((s) => s.addObject);
+  const addEvent = useGardenStore((s) => s.addEvent);
+  const viewDate = useGardenStore((s) => s.viewDate);
 
   if (!object) {
     return (
@@ -60,6 +72,35 @@ export default function PropertiesPanel() {
     setHistoryField({ rating: rating === value ? null : value });
   };
 
+  // Сбор урожая: сумма копится в history[currentYear].harvest + событие в журнал.
+  const addHarvest = (kg: number): void => {
+    if (kg <= 0) return;
+    const total = (yearEntry.harvest ?? 0) + kg;
+    updateObject(object.id, {
+      history: { ...object.history, [currentYear]: { ...yearEntry, harvest: total } },
+    });
+    addEvent(makeHarvestEvent(object.name, kg, total));
+  };
+
+  // Пересадка: объект «выкапывается» сегодня и тут же создаётся копия на новом месте.
+  const relocateNow = (): void => {
+    const date = viewDate ?? todayIso();
+    relocateObject(object.id, date);
+    const copy: typeof object = {
+      ...object,
+      id: crypto.randomUUID(),
+      x: object.x + 30,
+      y: object.y + 30,
+      year: currentYear,
+      plantedAt: date,
+      removedAt: null,
+      history: {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    addObject(copy);
+  };
+
   return (
     <aside className="w-[300px] panel z-10 flex flex-col flex-shrink-0 overflow-y-auto">
       <div className="panel-header">Свойства</div>
@@ -87,6 +128,35 @@ export default function PropertiesPanel() {
         </FieldRow>
 
         <div className="grid grid-cols-2 gap-3">
+          <FieldRow label="Цикл">
+            <select
+              value={object.lifecycle ?? 'perennial'}
+              onChange={(event) =>
+                updateObject(object.id, { lifecycle: event.target.value as PlantLifecycle })
+              }
+              className={inputClass}
+            >
+              <option value="perennial">Многолетник</option>
+              <option value="annual">Однолетник</option>
+            </select>
+          </FieldRow>
+          <FieldRow label="Посажен">
+            <input
+              type="date"
+              value={object.plantedAt ?? ''}
+              onChange={(event) => updateObject(object.id, { plantedAt: event.target.value || null })}
+              className={inputClass}
+            />
+          </FieldRow>
+        </div>
+
+        {object.removedAt && (
+          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            Выкопан {formatDateRu(object.removedAt)} — не виден на схеме после этой даты
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
           <FieldRow label="X" readOnly>
             <input type="text" value={Math.round(object.x)} readOnly className={readonlyClass} />
           </FieldRow>
@@ -103,16 +173,29 @@ export default function PropertiesPanel() {
 
         <div className="border-t border-border pt-4 space-y-3">
           <div className="text-xs uppercase tracking-wide text-text-secondary">
-            Урожай за {currentYear} год, кг
+            Урожай за {currentYear} год, кг — всего {yearEntry.harvest ?? 0}
           </div>
-          <input
-            type="number"
-            min={0}
-            step={0.1}
-            value={yearEntry.harvest ?? 0}
-            onChange={(event) => setHistoryField({ harvest: Number(event.target.value) })}
-            className={inputClass}
-          />
+          <div className="flex gap-2">
+            <input
+              type="number"
+              min={0}
+              step={0.1}
+              value={harvestInput}
+              onChange={(event) => setHarvestInput(event.target.value)}
+              placeholder="Сколько собрали"
+              className={inputClass}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                addHarvest(Number(harvestInput));
+                setHarvestInput('');
+              }}
+              className="btn-primary h-9 !py-0 text-sm whitespace-nowrap"
+            >
+              Собрать
+            </button>
+          </div>
 
           <div className="flex items-center gap-2">
             <button
@@ -149,6 +232,14 @@ export default function PropertiesPanel() {
             className={`${inputClass} resize-none`}
           />
         </div>
+
+        <button
+          type="button"
+          onClick={relocateNow}
+          className="w-full h-9 flex items-center justify-center gap-2 rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-background transition-colors"
+        >
+          <Move size={16} /> Пересадить (выкопать сегодня и посадить рядом)
+        </button>
 
         <button
           type="button"

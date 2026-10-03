@@ -2,9 +2,11 @@ import { Canvas, Point, Rect } from 'fabric';
 import type { TPointerEvent, TPointerEventInfo, FabricObject } from 'fabric';
 import { useEffect, useRef } from 'react';
 import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
+import { isVisibleInYear } from '../../utils/wayback';
 import type { ToolId } from '../../store/gardenStore';
-import type { GardenObject, GardenObjectType } from '../../types/garden';
-import { MARKER_SIZE } from '../../utils/markers';
+import type { GardenObject, GardenObjectType, IsoDate } from '../../types/garden';
+import { MARKER_SIZE, todayIso } from '../../utils/markers';
+import { makeEvent } from '../../utils/wayback';
 import {
   createFabricObjectFromEntry,
   drawGrid,
@@ -32,6 +34,7 @@ function createGardenObjectEntry(
   width = MARKER_SIZE,
   height = MARKER_SIZE,
   customIcon?: string | null,
+  plantedAt?: IsoDate,
 ): GardenObject {
   const now = new Date().toISOString();
   return {
@@ -47,6 +50,8 @@ function createGardenObjectEntry(
     varieties: [],
     history: { [year]: { harvest: 0 } },
     customIcon: customIcon ?? null,
+    lifecycle: 'perennial',
+    plantedAt: plantedAt ?? todayIso(),
     createdAt: now,
     updatedAt: now,
   };
@@ -88,7 +93,6 @@ export default function GardenCanvas() {
   const lastScreenPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const setCanvas = useGardenStore((s) => s.setCanvas);
-  const objects = useGardenStore((s) => s.objects);
   const scale = useCanvasStore((s) => s.scale);
   const gridStep = useCanvasStore((s) => s.gridStep);
   const activeTool = useCanvasStore((s) => s.activeTool);
@@ -192,7 +196,16 @@ export default function GardenCanvas() {
 
     const onObjectModified = (): void => {
       const activeObj = canvas.getActiveObject();
-      if (activeObj) syncFabricObjectToStore(activeObj);
+      if (!activeObj) return;
+      const id = getGardenId(activeObj);
+      const before = id ? useGardenStore.getState().objects.find((o) => o.id === id) : undefined;
+      syncFabricObjectToStore(activeObj);
+      // Событие «перемещение» в журнал (wayback machine) — только если реально сдвинули
+      if (before && (Math.abs(before.x - (activeObj.left ?? 0)) > 1 || Math.abs(before.y - (activeObj.top ?? 0)) > 1)) {
+        useGardenStore.getState().addEvent(
+          makeEvent('moved', before, `Перемещено: ${before.name} → (${Math.round(activeObj.left ?? 0)}; ${Math.round(activeObj.top ?? 0)})`),
+        );
+      }
     };
 
     const finalizeBedDraft = (point: Point): void => {
@@ -207,7 +220,17 @@ export default function GardenCanvas() {
 
       const gs = useGardenStore.getState();
       const bedsCount = gs.objects.filter((o) => o.type === 'bed').length + 1;
-      const entry = createGardenObjectEntry('bed', `Грядка ${bedsCount}`, gs.currentYear, left, top, width, height);
+      const entry = createGardenObjectEntry(
+        'bed',
+        `Грядка ${bedsCount}`,
+        gs.currentYear,
+        left,
+        top,
+        width,
+        height,
+        undefined,
+        gs.viewDate ?? undefined, // wayback: посадка «в этот день», если выбрана дата просмотра
+      );
 
       // fabric-объект строится из записи store — тот же путь, что и при загрузке проекта
       const rect = createFabricObjectFromEntry(entry);
@@ -222,7 +245,7 @@ export default function GardenCanvas() {
       bedDraftRef.current = null;
     };
 
-    const placeTreeMarker = (pointer: Point): void => {
+    const placeTreeMarker = (pointer: Point, plantDate?: string | null): void => {
       const snapped = getSnapPoint(pointer.x, pointer.y);
       const gs = useGardenStore.getState();
       const entry = createGardenObjectEntry(
@@ -234,6 +257,7 @@ export default function GardenCanvas() {
         MARKER_SIZE,
         MARKER_SIZE,
         '🍎',
+        plantDate ?? undefined,
       );
       gs.addObject(entry);
 
@@ -305,7 +329,7 @@ export default function GardenCanvas() {
       }
 
       if (tool === 'tree') {
-        placeTreeMarker(canvas.getScenePoint(event.e));
+        placeTreeMarker(canvas.getScenePoint(event.e), useGardenStore.getState().viewDate);
       }
     };
 
@@ -368,9 +392,10 @@ export default function GardenCanvas() {
       if (!activeObj) return;
       const id = getGardenId(activeObj);
       if (!id) return;
+      // Soft-delete: removeObject помечает removedAt; reconcile уберёт объект со схемы.
+      useGardenStore.getState().removeObject(id);
       canvas.remove(activeObj);
       canvas.renderAll();
-      useGardenStore.getState().removeObject(id);
     };
 
     const onKeyDownDelete = (event: KeyboardEvent): void => {
@@ -480,12 +505,16 @@ export default function GardenCanvas() {
     if (fabricRef.current) setBackgroundSelectable(fabricRef.current, !backgroundLocked);
   }, [backgroundLocked]);
 
-  // Синхронизация слоя объектов при смене года или загрузке проекта (файл/автосейв)
+  // Синхронизация слоя объектов при смене года/даты просмотра (wayback machine)
+  // или изменении набора видимых объектов (загрузка проекта, добавление/удаление).
   const currentYear = useGardenStore((s) => s.currentYear);
-  const objectsCount = objects.length;
+  const viewDate = useGardenStore((s) => s.viewDate);
+  const visibleIds = useGardenStore((s) =>
+    s.objects.filter((o) => isVisibleInYear(o, s.currentYear)).map((o) => o.id).join(','),
+  );
   useEffect(() => {
     if (fabricRef.current) reconcileObjectsWithStore(fabricRef.current);
-  }, [objectsCount, currentYear]);
+  }, [visibleIds, currentYear, viewDate]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-background">

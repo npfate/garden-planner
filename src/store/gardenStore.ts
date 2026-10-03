@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { Canvas as FabricCanvas } from 'fabric';
-import type { GardenObject } from '../types/garden';
+import type { ActivityEvent, GardenObject, IsoDate } from '../types/garden';
+import { formatDateRu, isoYear, todayIso } from '../utils/markers';
+import { isVisibleInYear, lifeBounds, makeEvent } from '../utils/wayback';
 
 export type ToolId = 'select' | 'pan' | 'bed' | 'tree';
 
@@ -8,6 +10,7 @@ export interface GardenFileSnapshot {
   version: number;
   savedAt: string;
   objects: GardenObject[];
+  events: ActivityEvent[];
   backgroundImage: string | null;
   currentYear: number;
   scale: number;
@@ -18,6 +21,10 @@ export interface GardenFileSnapshot {
 interface GardenState {
   objects: GardenObject[];
   currentYear: number;
+  // Wayback machine: дата просмотра схемы (внутри currentYear).
+  // null = «конец года» (годовой режим без точной даты).
+  viewDate: IsoDate | null;
+  events: ActivityEvent[];
   selectedObjectId: string | null;
   canvas: FabricCanvas | null;
 }
@@ -26,10 +33,14 @@ interface GardenActions {
   addObject: (obj: GardenObject) => void;
   updateObject: (id: string, updates: Partial<GardenObject>) => void;
   removeObject: (id: string) => void;
+  relocateObject: (id: string, date: IsoDate) => void;
+  addEvent: (event: ActivityEvent) => void;
   setObjects: (objects: GardenObject[]) => void;
   setYear: (year: number) => void;
+  setViewDate: (date: IsoDate | null) => void;
   selectObject: (id: string | null) => void;
   setCanvas: (canvas: FabricCanvas | null) => void;
+  visibleObjects: () => GardenObject[];
   saveToFile: () => string;
   loadFromFile: (json: string) => void;
 }
@@ -41,6 +52,8 @@ const CURRENT_YEAR_DEFAULT = 2024;
 export const useGardenStore = create<GardenStore>((set, get) => ({
   objects: [],
   currentYear: CURRENT_YEAR_DEFAULT,
+  viewDate: null,
+  events: [],
   selectedObjectId: null,
   canvas: null,
 
@@ -48,6 +61,9 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     set((state) => ({
       objects: [...state.objects, { ...obj, updatedAt: new Date().toISOString() }],
     }));
+    get().addEvent(
+      makeEvent('planted', obj, `Посадка: ${obj.name} (${formatDateRu(obj.plantedAt ?? todayIso())})`),
+    );
   },
 
   updateObject: (id: string, updates: Partial<GardenObject>): void => {
@@ -59,9 +75,48 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   },
 
   removeObject: (id: string): void => {
+    const obj = get().objects.find((o) => o.id === id);
+    // Вместо физического удаления — «выкопка»: объект помечается removedAt
+    // и исчезает со схемы при просмотре дат после выкопки (wayback machine).
+    if (obj && !obj.removedAt) {
+      const date = todayIso();
+      set((state) => ({
+        objects: state.objects.map((o) => (o.id === id ? { ...o, removedAt: date } : o)),
+      }));
+      get().addEvent(makeEvent('removed', obj, `Удалён (выкопан): ${obj.name}, ${formatDateRu(date)}`, date));
+      return;
+    }
     set((state) => ({
       objects: state.objects.filter((o) => o.id !== id),
       selectedObjectId: state.selectedObjectId === id ? null : state.selectedObjectId,
+    }));
+    if (obj) {
+      get().addEvent(makeEvent('removed', obj, `Удалён безвозвратно: ${obj.name}`));
+    }
+  },
+
+  // Пересадка: в указанный день объект «исчезает» со старого места.
+  // Пользователь тут же рисует новый объект (новая дата посадки) — на новом месте.
+  relocateObject: (id: string, date: IsoDate): void => {
+    const obj = get().objects.find((o) => o.id === id);
+    if (!obj) return;
+    set((state) => ({
+      objects: state.objects.map((o) => (o.id === id ? { ...o, removedAt: date } : o)),
+      selectedObjectId: null,
+    }));
+    get().addEvent(
+      makeEvent(
+        'moved',
+        obj,
+        `Пересадка: ${obj.name} выкопан ${formatDateRu(date)} — посадите его заново в новом месте`,
+        date,
+      ),
+    );
+  },
+
+  addEvent: (event: ActivityEvent): void => {
+    set((state) => ({
+      events: [...state.events, event].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
     }));
   },
 
@@ -70,7 +125,15 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   },
 
   setYear: (year: number): void => {
-    set({ currentYear: year });
+    set({ currentYear: year, viewDate: null });
+  },
+
+  setViewDate: (date: IsoDate | null): void => {
+    const y = isoYear(date);
+    set((state) => ({
+      viewDate: date,
+      currentYear: date && y !== null ? y : state.currentYear,
+    }));
   },
 
   selectObject: (id: string | null): void => {
@@ -79,6 +142,20 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
 
   setCanvas: (canvas: FabricCanvas | null): void => {
     set({ canvas });
+  },
+
+  // Объекты, видимые «на этот момент времени» (год + опциональная дата).
+  visibleObjects: (): GardenObject[] => {
+    const { objects, currentYear, viewDate } = get();
+    return objects.filter((o) => {
+      if (!isVisibleInYear(o, currentYear)) return false;
+      if (viewDate) {
+        const { start, end } = lifeBounds(o);
+        if (o.plantedAt && start > viewDate) return false; // ещё не посажен на эту дату
+        if (o.removedAt && end && end <= viewDate) return false; // уже выкопан
+      }
+      return true;
+    });
   },
 
   // Собирает снапшот, подтягивая не-доменные поля из canvasStore.
@@ -90,6 +167,7 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       version: 1,
       savedAt: new Date().toISOString(),
       objects: state.objects,
+      events: state.events,
       backgroundImage: cs.backgroundImage,
       currentYear: state.currentYear,
       scale: cs.scale,
@@ -107,9 +185,10 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       }
       const p = parsed as Partial<GardenFileSnapshot>;
       const objects: GardenObject[] = Array.isArray(p.objects) ? p.objects : [];
+      const events: ActivityEvent[] = Array.isArray(p.events) ? p.events : [];
       const currentYear: number =
         typeof p.currentYear === 'number' ? p.currentYear : CURRENT_YEAR_DEFAULT;
-      set({ objects, currentYear, selectedObjectId: null });
+      set({ objects, events, currentYear, viewDate: null, selectedObjectId: null });
 
       const cs = useCanvasStore.getState();
       if (typeof p.backgroundImage === 'string') cs.setBackgroundImage(p.backgroundImage);

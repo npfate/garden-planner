@@ -3,6 +3,7 @@ import type { Canvas as FabricCanvas, FabricObject } from 'fabric';
 import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
 import type { GardenObject } from '../../types/garden';
 import { MARKER_SIZE, getMarkerColor } from '../../utils/markers';
+import { isVisibleInYear } from '../../utils/wayback';
 
 export const GRID_COLOR = '#E5E7EB';
 export const PIXELS_PER_METER = 50;
@@ -77,25 +78,28 @@ export function createFabricObjectFromEntry(entry: GardenObject): Rect {
   return rect;
 }
 
-// Полная перерисовка слоя объектов вызывается только при загрузке проекта
-// (автосейв/файл .garden) и смене года. Чтобы не затирать уже созданные
-// грядки-прямоугольники точками-метками, синхронизируем поштучно только
-// те объекты, у которых изменились год или размеры.
+// Синхронизация слоя объектов со store (wayback machine).
+// Вызывается при загрузке проекта, смене года/даты просмотра и изменении
+// набора объектов. На схеме остаются только объекты, «жившие» в выбранный
+// момент времени; чтобы не затирать уже созданные грядки-прямоугольники
+// точками-метками, синхронизируем поштучно только то, что изменилось.
 export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
-  const { objects, currentYear } = useGardenStore.getState();
-  const entriesById = new Map(objects.map((o) => [o.id, o]));
+  const state = useGardenStore.getState();
+  const { currentYear } = state;
+  const visible = state.visibleObjects();
+  const entriesById = new Map(visible.map((o) => [o.id, o]));
 
-  // 1) Удаляем fabric-объекты, которых больше нет в store
+  // 1) Удаляем fabric-объекты, скрытые временем или удалённые из store
   for (const obj of [...canvas.getObjects()]) {
     const id = getGardenId(obj);
     if (id && !entriesById.has(id)) canvas.remove(obj);
   }
 
-  // 2) Добавляем/обновляем объекты из store
-  for (const entry of objects) {
+  // 2) Добавляем/обновляем видимые объекты из store
+  for (const entry of visible) {
     let opacity = 1;
-    if (entry.year > currentYear) opacity = 0; // будущие годы скрыты
-    else if (entry.year < currentYear) opacity = 0.35; // прошлые — полупрозрачные
+    const plantedYear = entry.plantedAt ? Number(entry.plantedAt.slice(0, 4)) : entry.year;
+    if (plantedYear < currentYear) opacity = 0.35; // прошлое — полупрозрачно («история»)
 
     const existing = findObjectByGardenId(canvas, entry.id);
     if (!existing) {
@@ -125,9 +129,9 @@ export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
   }
 
   // Сохраняем выделение, если объект всё ещё виден
-  const selectedId = useGardenStore.getState().selectedObjectId;
+  const selectedId = state.selectedObjectId;
   const visibleSelected =
-    selectedId && objects.find((o) => o.id === selectedId && o.year <= currentYear);
+    selectedId && visible.find((o) => o.id === selectedId && isVisibleInYear(o, currentYear));
   if (visibleSelected) {
     const obj = findObjectByGardenId(canvas, selectedId as string);
     if (obj) canvas.setActiveObject(obj);
