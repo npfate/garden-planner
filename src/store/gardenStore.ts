@@ -200,7 +200,10 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     set((state) => {
       if (!state.viewDate) return { currentYear: year };
       const [, m, d] = state.viewDate.split('-');
-      const next = `${year}-${m}-${d}` as IsoDate;
+      // 29 февраля переносим на 28, если целевой год невисокосный
+      const lastDay = new Date(Date.UTC(year, Number(m), 0)).getUTCDate();
+      const safeDay = String(Math.min(Number(d), lastDay)).padStart(2, '0');
+      const next = `${year}-${m}-${safeDay}` as IsoDate;
       return { currentYear: year, viewDate: next };
     });
   },
