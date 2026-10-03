@@ -105,11 +105,12 @@ export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
       continue;
     }
 
-    const w = Math.max(existing.width ?? 0, 0);
-    const h = Math.max(existing.height ?? 0, 0);
-    const sizeMatches =
-      entry.type !== 'bed' ||
-      (Math.abs(w - entry.width) < 0.5 && Math.abs(h - entry.height) < 0.5);
+    // Метки (не-грядки) всегда имеют фиксированный размер MARKER_SIZE,
+    // поэтому сравнение с entry.width/height не применимо — обновляем только прозрачность.
+    const isBed = entry.type === 'bed';
+    const w = Math.max(existing.getScaledWidth(), 0);
+    const h = Math.max(existing.getScaledHeight(), 0);
+    const sizeMatches = !isBed || (Math.abs(w - entry.width) < 0.5 && Math.abs(h - entry.height) < 0.5);
 
     if (!sizeMatches) {
       // размеры в store разошлись с canvas (например, загружен файл) —
