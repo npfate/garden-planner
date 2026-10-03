@@ -1,6 +1,5 @@
 import type { ActivityEvent, GardenObject, IsoDate } from '../types/garden';
 import { isoYear, todayIso } from './markers';
-
 // --- Wayback machine: временна́я модель сада ---
 //
 // Каждый объект живёт в интервале [plantedAt, removedAt]. Переключая год и
@@ -49,13 +48,20 @@ export function isVisibleInYear(obj: GardenObject, year: number): boolean {
 }
 
 // Виден ли объект «на этот момент времени» (год + опциональная точная дата).
-// viewDate === null — годовой режим (смотрим на конец года).
+// viewDate === null — смотрим на сад «сегодня» (todayIso), а не на конец года:
+// раньше здесь подставлялось YYYY-12-31, из-за чего годовой режим расходился
+// с дневным (объекты «оживали» раньше/позже, чем должны). nowOf() в сторе
+// использует то же правило — логика единая.
 export function isVisibleAt(obj: GardenObject, year: number, viewDate?: IsoDate | null): boolean {
   if (!isVisibleInYear(obj, year)) return false;
-  if (!viewDate) return true;
-  const { start, end } = lifeBounds(obj);
-  if (obj.plantedAt && start > viewDate) return false; // ещё не посажен на эту дату
-  if (obj.removedAt && end && end <= viewDate) return false; // уже выкопан
+  const now = viewDate ?? todayIso();
+  // Если дата просмотра лежит в другом году относительно currentYear —
+  // сверяемся строго по году (setViewDate синхронизирует их, но защитимся).
+  const py = isoYear(now);
+  if (py !== null && py !== year) return isVisibleInYear(obj, py);
+  const { start } = lifeBounds(obj);
+  if (obj.plantedAt && start > now) return false; // ещё не посажен на эту дату
+  if (obj.removedAt && obj.removedAt <= now) return false; // уже выкопан
   return true;
 }
 

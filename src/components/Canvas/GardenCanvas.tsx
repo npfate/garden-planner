@@ -545,7 +545,7 @@ export default function GardenCanvas() {
   // места скрыты, пока следующая запись цепочки жива (см. visibleObjects).
   const visibleIds = useGardenStore((s) => {
     const byId = new Map(s.objects.map((o) => [o.id, o]));
-    const now = s.viewDate ?? `${s.currentYear}-12-31`;
+    const now = s.viewDate ?? todayIso();
     return s.objects
       .filter((o) => {
         if (!isVisibleAt(o, s.currentYear, s.viewDate)) return false;

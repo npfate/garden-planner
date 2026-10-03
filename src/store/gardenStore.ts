@@ -54,11 +54,15 @@ interface GardenActions {
 
 export type GardenStore = GardenState & GardenActions;
 
-const CURRENT_YEAR_DEFAULT = 2024;
+// Год по умолчанию — текущий (не захардкожен).
+const CURRENT_YEAR_DEFAULT = Number(todayIso().slice(0, 4));
 
-// Момент «сейчас» для годового режима (viewDate === null): конец выбранного года.
-function nowOf(viewDate: IsoDate | null, year?: number): string {
-  return viewDate ?? `${year ?? CURRENT_YEAR_DEFAULT}-12-31`;
+// Единый момент «сейчас» для всей временнóй логики. Раньше годовой режим
+// (viewDate === null) трактовался как «конец года» (YYYY-12-31), а UI показывал
+// сегодняшнюю дату — из-за этого объекты при перемотке вели себя несогласованно.
+// Теперь: если точная дата просмотра не выбрана, смотрим на сад «сегодня».
+export function momentOf(viewDate: IsoDate | null): string {
+  return viewDate ?? todayIso();
 }
 
 // Выкопан ли объект к указанной дате (removedAt строго раньше даты).
@@ -189,8 +193,16 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     set({ objects });
   },
 
+  // Смена года сохраняет день и месяц выбранной даты просмотра
+  // (годовой режим больше не «рушит» дневной срез). Если дата не выбрана —
+  // просто переключаем год, «сейчас» остаётся сегодняшним числом.
   setYear: (year: number): void => {
-    set({ currentYear: year, viewDate: null });
+    set((state) => {
+      if (!state.viewDate) return { currentYear: year };
+      const [, m, d] = state.viewDate.split('-');
+      const next = `${year}-${m}-${d}` as IsoDate;
+      return { currentYear: year, viewDate: next };
+    });
   },
 
   setViewDate: (date: IsoDate | null): void => {
@@ -219,18 +231,17 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   visibleObjects: (): GardenObject[] => {
     const { objects, currentYear, viewDate } = get();
     const byId = new Map(objects.map((o) => [o.id, o]));
+    const now = momentOf(viewDate);
     return objects.filter((o) => {
       if (!isVisibleInYear(o, currentYear)) return false;
       if (o.transplantedToId) {
         const next = byId.get(o.transplantedToId);
-        const nextStillAlive = !!next && !isDugBy(nowOf(viewDate, currentYear), next);
+        const nextStillAlive = !!next && !isDugBy(now, next);
         if (next && nextStillAlive) return false; // показываем только последнее место
       }
-      if (viewDate) {
-        const { start, end } = lifeBounds(o);
-        if (o.plantedAt && start > viewDate) return false; // ещё не посажен на эту дату
-        if (o.removedAt && end && end <= viewDate) return false; // уже выкопан
-      }
+      // Единая временна́я проверка: дата просмотра или «сегодня».
+      if (o.plantedAt && lifeBounds(o).start > now) return false; // ещё не посажен
+      if (o.removedAt && o.removedAt <= now) return false; // уже выкопан
       return true;
     });
   },
