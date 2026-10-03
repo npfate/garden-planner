@@ -1,75 +1,72 @@
-# React + TypeScript + Vite
+# GardenPlanner Pro
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Кроссплатформенное веб-приложение для планирования садового участка.
 
-Currently, two official plugins are available:
+Пользователь рисует схему участка поверх фотографии или кадастровой карты,
+расставляет деревья, грядки и теплицы, ведёт историю посадок по годам,
+учитывает урожай и оценивает сорта.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Технологии
 
-## React Compiler
+- **React 19 + TypeScript (strict)** — интерфейс и типизация
+- **Vite** — сборка и dev-сервер
+- **Fabric.js** — холст (сетка, зум, объекты, drag&drop)
+- **Zustand** — состояние приложения (`gardenStore` — данные, `useCanvasStore` — canvas/UI)
+- **Tailwind CSS** — стили
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Возможности (Этап 1 — MVP)
 
-## Expanding the ESLint configuration
+- Схема участка сверху: фоновое изображение с «замком», сетка с настраиваемым шагом, привязка к сетке, зум
+- Объекты: дерево, грядка, теплица — метки контрастных цветов + панель свойств
+- Переключение лет (YearSwitcher ◄ ►): история объектов по годам
+- Учёт урожая, оценки сортов 👍/👎 и заметки — сохраняются для каждого года отдельно
+- Сохранение / загрузка проекта в файл `.garden` (JSON)
+- Автосохранение в localStorage каждые 5 минут, восстановление при перезагрузке
+- Инвентарь: библиотека предустановленных объектов и агрегированные оценки сортов
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Быстрый старт
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Требуется Node.js 18+.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm install     # установка зависимостей
+npm run dev     # запуск dev-сервера → http://localhost:5173/
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+Другие команды:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+npm run build   # проверка типов (tsc) + продакшн-сборка в dist/
+npm run preview # локальный просмотр продакшн-сборки
+npm run lint    # ESLint
+```
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Структура проекта
 
 ```
+src/
+  components/       # UI-компоненты (Toolbar, PropertiesPanel, YearSwitcher, …)
+    Canvas/         # GardenCanvas + fabricSync (синхронизация Fabric ↔ Zustand)
+  constants/        # предустановленный инвентарь
+  hooks/            # useAutosave и др.
+  store/            # gardenStore (данные), useCanvasStore (canvas/UI)
+  types/            # TypeScript-типы (GardenObject, YearRecord, …)
+  utils/            # маркеры, работа с файлами
+docs/               # документация проекта
+```
+
+## Документация
+
+Все инструкции и документы проекта находятся в папке [`docs/`](docs/):
+
+| Файл | Описание |
+|---|---|
+| [PROMPT.md](docs/PROMPT.md) | Техническое задание: цели, функции, требования |
+| [RULES.md](docs/RULES.md) | Правила работы над кодом и процессом разработки |
+| [ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md) | Журнал архитектурных решений (AD-001, AD-002, …) |
+| [ROADMAP.md](docs/ROADMAP.md) | План разработки по этапам |
+| [CHANGELOG.md](docs/CHANGELOG.md) | История изменений по крупным вехам |
+
+## Статус разработки
+
+Текущий фокус — **Этап 1 (MVP)**, детали в [docs/ROADMAP.md](docs/ROADMAP.md).
