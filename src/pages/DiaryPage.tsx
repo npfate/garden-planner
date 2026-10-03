@@ -1,18 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Flower2, MapPinOff, MoveRight, Sprout, StickyNote } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import { useGardenStore } from '../store/gardenStore';
 import type { ActivityEvent, ActivityKind } from '../types/garden';
 import { formatDateRu, isoYear } from '../utils/markers';
 import { groupEventsByDay } from '../utils/wayback';
-
-const EVENT_META: Record<ActivityKind, { icon: LucideIcon; label: string; className: string }> = {
-  planted: { icon: Sprout, label: 'Посадка', className: 'bg-green-100 text-green-700' },
-  moved: { icon: MoveRight, label: 'Перемещение', className: 'bg-blue-100 text-blue-700' },
-  harvest: { icon: Flower2, label: 'Урожай', className: 'bg-amber-100 text-amber-700' },
-  removed: { icon: MapPinOff, label: 'Удаление', className: 'bg-red-100 text-red-700' },
-  note: { icon: StickyNote, label: 'Заметка', className: 'bg-gray-100 text-gray-700' },
-};
+// Метаданные событий и настройки тепловой карты — единый источник из config.
+// Новые типы событий / пороги / цвета добавляются в src/config/activity.ts,
+// этот компонент менять не нужно.
+import { ACTIVITY_META, ACTIVITY_ORDER, heatmapCellClass } from '../config/activity';
 
 // Тепловая сетка «как на GitHub»: события по дням за выбранный год.
 function Heatmap({ events, year }: { events: ActivityEvent[]; year: number }) {
@@ -34,13 +28,6 @@ function Heatmap({ events, year }: { events: ActivityEvent[]; year: number }) {
     d.setDate(d.getDate() + 1);
   }
 
-  const cellClass = (count: number): string => {
-    if (count === 0) return 'bg-gray-100';
-    if (count === 1) return 'bg-green-200';
-    if (count <= 3) return 'bg-green-400';
-    return 'bg-green-600';
-  };
-
   return (
     <div className="grid grid-flow-col gap-1 auto-cols-max overflow-x-auto p-2 panel rounded-lg border border-border">
       {days.map((date) => {
@@ -49,7 +36,7 @@ function Heatmap({ events, year }: { events: ActivityEvent[]; year: number }) {
           <div
             key={date}
             title={`${formatDateRu(date)}: ${count} событ.`}
-            className={`w-3 h-3 rounded-sm flex-shrink-0 ${cellClass(count)}`}
+            className={`w-3 h-3 rounded-sm flex-shrink-0 ${heatmapCellClass(count)}`}
           />
         );
       })}
@@ -91,11 +78,11 @@ export default function DiaryPage() {
             aria-label="Фильтр по типу"
           >
             <option value="all">Все события</option>
-            <option value="planted">Посадки</option>
-            <option value="moved">Перемещения</option>
-            <option value="harvest">Урожай</option>
-            <option value="removed">Удаления</option>
-            <option value="note">Заметки</option>
+            {ACTIVITY_ORDER.map((kind) => (
+              <option key={kind} value={kind}>
+                {ACTIVITY_META[kind].label}
+              </option>
+            ))}
           </select>
           <select
             value={currentYear}
@@ -129,7 +116,7 @@ export default function DiaryPage() {
             <h2 className="text-sm font-semibold text-text-primary mb-2">{formatDateRu(group.date)}</h2>
             <ul className="space-y-2">
               {group.events.map((ev) => {
-                const meta = EVENT_META[ev.kind];
+                const meta = ACTIVITY_META[ev.kind];
                 const Icon = meta.icon;
                 return (
                   <li
