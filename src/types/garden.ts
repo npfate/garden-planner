@@ -65,6 +65,11 @@ export interface GardenObject {
   lifecycle?: PlantLifecycle;
   plantedAt?: IsoDate | null; // дата посадки (май, август и т.д.)
   removedAt?: IsoDate | null; // дата выкопки/удаления (объект «исчезает» после неё)
+  // Пересадка: если объект появился в результате пересадки — ссылка на
+  // предыдущее место и дату. Парная цепочка old.transplantedToId = new.id.
+  transplantedFromId?: string | null;
+  transplantedToId?: string | null;
+  transplantedAt?: IsoDate | null;
   createdAt: string;
   updatedAt: string;
 }

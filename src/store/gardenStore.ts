@@ -129,24 +129,33 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   // новая сажается рядом с полным сохранением свойств (тип, название, размер,
   // цикл, иконка) и датированной историей. Возвращает новую запись —
   // вызывающий добавит её на canvas.
+  // Связь мест: old.transplantedToId ↔ new.transplantedFromId + transplantedAt
+  // (canvas рисует по ней пунктирную стрелку «откуда → куда»).
   transplantObject: (id: string, date: IsoDate): GardenObject | null => {
     const obj = get().objects.find((o) => o.id === id);
     if (!obj) return null;
     const now = new Date().toISOString();
+    const nextId = crypto.randomUUID();
     const next: GardenObject = {
       ...obj,
-      id: crypto.randomUUID(),
+      id: nextId,
       x: obj.x + 30,
       y: obj.y + 30,
       year: isoYear(date) ?? obj.year,
       plantedAt: date,
       removedAt: null,
-      history: {},
+      // история переносится к новому объекту (урожай/оценки не теряются)
+      history: { ...obj.history },
+      transplantedFromId: obj.id,
+      transplantedToId: null,
+      transplantedAt: date,
       createdAt: now,
       updatedAt: now,
     };
     set((state) => ({
-      objects: state.objects.map((o) => (o.id === id ? { ...o, removedAt: date } : o)),
+      objects: state.objects.map((o) =>
+        o.id === id ? { ...o, removedAt: date, transplantedToId: nextId, updatedAt: now } : o,
+      ),
     }));
     get().addObject(next);
     get().addEvent(

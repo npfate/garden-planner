@@ -35,6 +35,19 @@ export default function YearSwitcher() {
     setViewDate(shiftIsoDate(base, days));
   };
 
+  // Сдвиг точной даты просмотра на ±1 год (стрелки вокруг поля года).
+  // Если выбрана дата — сдвигаем её на целый календарный год, сохраняя день и месяц.
+  const stepYear = (years: number): void => {
+    if (!viewDate) {
+      setYear(Math.min(MAX_YEAR, Math.max(MIN_YEAR, currentYear + years)));
+      return;
+    }
+    const [y, m, d] = viewDate.split('-').map(Number);
+    const shifted = new Date(Date.UTC((y ?? 0) + years, (m ?? 1) - 1, d ?? 1));
+    const iso = shifted.toISOString().slice(0, 10) as IsoDate;
+    setViewDate(iso);
+  };
+
   // Клик по текстовой части поля не всегда открывает календарь —
   // форсируем показ нативного date-picker'а.
   const openCalendar = (event: MouseEvent<HTMLElement>): void => {
@@ -104,7 +117,7 @@ export default function YearSwitcher() {
         aria-label="Предыдущий год"
         className={btnClass}
         disabled={currentYear <= MIN_YEAR}
-        onClick={() => setYear(Math.max(MIN_YEAR, currentYear - 1))}
+        onClick={() => stepYear(-1)}
       >
         <ChevronLeft size={16} />
       </button>
@@ -126,7 +139,7 @@ export default function YearSwitcher() {
         aria-label="Следующий год"
         className={btnClass}
         disabled={currentYear >= MAX_YEAR}
-        onClick={() => setYear(Math.min(MAX_YEAR, currentYear + 1))}
+        onClick={() => stepYear(1)}
       >
         <ChevronRight size={16} />
       </button>

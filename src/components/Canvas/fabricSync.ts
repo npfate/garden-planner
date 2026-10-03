@@ -1,9 +1,9 @@
-import { FabricImage, Group, Line, Rect } from 'fabric';
+import { FabricImage, Group, Line, Rect, Triangle } from 'fabric';
 import type { Canvas as FabricCanvas, FabricObject } from 'fabric';
 import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
 import type { GardenObject } from '../../types/garden';
 import { MARKER_SIZE, getMarkerColor } from '../../utils/markers';
-import { isVisibleInYear } from '../../utils/wayback';
+import { isVisibleInYear, lifeBounds } from '../../utils/wayback';
 
 export const GRID_COLOR = '#E5E7EB';
 export const PIXELS_PER_METER = 50;
@@ -52,25 +52,28 @@ export function markAsCreatedOnCanvas(obj: FabricObject): void {
   (obj as unknown as Record<string, unknown>)[CREATED_FLAG_KEY] = true;
 }
 
-export function wasCreatedOnCanvas(obj: FabricObject): boolean {
-  return (obj as unknown as Record<string, unknown>)[CREATED_FLAG_KEY] === true;
-}
-
 // Создание fabric-объекта для записи store.
-// Грядки — прямоугольники с их реальными размерами (рисуются drag'ом на canvas),
-// остальные типы — точки-метки фиксированного размера (MARKER_SIZE).
+// Размеры всегда берутся из записи (пользователь может увеличить объект
+// рамкой трансформации — значения сохраняются в store при object:modified).
 export function createFabricObjectFromEntry(entry: GardenObject): Rect {
   const isBed = entry.type === 'bed';
-  const width = isBed ? Math.max(entry.width, 1) : MARKER_SIZE;
-  const height = isBed ? Math.max(entry.height, 1) : MARKER_SIZE;
+  // Для ВСЕХ типов берём сохранённые пользователем размеры из store
+  // (раньше немаркированные объекты строились фиксированным MARKER_SIZE —
+  //  из-за этого увеличенное дерево после перемотки даты становилось «квадратиком»).
+  const width = Math.max(entry.width, 1);
+  const height = Math.max(entry.height, 1);
+
+  // Метка, посаженная кликом, имеет размер MARKER_SIZE и рисуется как точка
+  // (origin center); увеличенная рамкой — уже полноценный прямоугольник.
+  const isMarkerSize = !isBed && width <= MARKER_SIZE + 0.5 && height <= MARKER_SIZE + 0.5;
 
   const rect = new Rect({
     left: entry.x,
     top: entry.y,
     width,
     height,
-    originX: isBed ? 'left' : 'center',
-    originY: isBed ? 'top' : 'center',
+    originX: isMarkerSize ? 'center' : 'left',
+    originY: isMarkerSize ? 'center' : 'top',
     selectable: true,
     evented: true,
     objectCaching: false,
@@ -89,6 +92,85 @@ export function createFabricObjectFromEntry(entry: GardenObject): Rect {
   if (entry.rotation) rect.set({ angle: entry.rotation });
   setGardenId(rect, entry.id);
   return rect;
+}
+
+// --- Стрелки пересадок (пунктир «откуда → куда») ---
+
+const TRANSPLANT_FLAG_KEY = '__gardenTransplantLine';
+
+export function isTransplantLine(obj: FabricObject): boolean {
+  return (obj as unknown as Record<string, unknown>)[TRANSPLANT_FLAG_KEY] === true;
+}
+
+function markAsTransplantLine(obj: FabricObject): void {
+  (obj as unknown as Record<string, unknown>)[TRANSPLANT_FLAG_KEY] = true;
+}
+
+// Центр «визуального» объекта: метка-точка рисуется с origin center,
+// прямоугольник (грядка/увеличенный объект) — с origin left/top.
+function objectCenter(o: GardenObject): { x: number; y: number } {
+  return { x: o.x + o.width / 2, y: o.y + o.height / 2 };
+}
+
+// Перерисовка пунктирных стрелок для всех пересадок, «актуальных» на
+// текущий момент времени wayback-машины: старое место полупрозрачно,
+// новое — ярче. Вызывается из reconcile при каждом изменении слоя объектов.
+export function drawTransplantArrows(canvas: FabricCanvas): void {
+  for (const obj of [...canvas.getObjects()]) {
+    if (isTransplantLine(obj)) canvas.remove(obj);
+  }
+
+  const { objects, currentYear, viewDate } = useGardenStore.getState();
+  const byId = new Map(objects.map((o) => [o.id, o]));
+
+  for (const target of objects) {
+    if (!target.transplantedFromId || !target.transplantedAt) continue;
+    const source = byId.get(target.transplantedFromId);
+    if (!source) continue;
+    // стрелку показываем, когда хотя бы одно из мест видно в этот момент времени
+    const targetVisible = isVisibleInYear(target, currentYear);
+    const sourceVisible = isVisibleInYear(source, currentYear);
+    if (!targetVisible && !sourceVisible) continue;
+    if (viewDate) {
+      const tb = lifeBounds(target);
+      const sb = lifeBounds(source);
+      const tVis = !(tb.start > viewDate || (tb.end !== null && tb.end <= viewDate));
+      const sVis = !(sb.start > viewDate || (sb.end !== null && sb.end <= viewDate));
+      if (!tVis && !sVis) continue;
+    }
+
+    const from = objectCenter(source);
+    const to = objectCenter(target);
+    const line = new Line([from.x, from.y, to.x, to.y], {
+      stroke: '#6366F1',
+      strokeWidth: 1.5,
+      strokeDashArray: [6, 4],
+      opacity: 0.7,
+      selectable: false,
+      evented: false,
+    });
+    markAsTransplantLine(line);
+    canvas.add(line);
+
+    // наконечник стрелки у нового места
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    const headLen = 9;
+    const head = new Triangle({
+      left: to.x,
+      top: to.y,
+      width: headLen,
+      height: headLen,
+      originX: 'center',
+      originY: 'center',
+      angle: (angle * 180) / Math.PI + 90,
+      fill: '#6366F1',
+      opacity: 0.9,
+      selectable: false,
+      evented: false,
+    });
+    markAsTransplantLine(head);
+    canvas.add(head);
+  }
 }
 
 // Синхронизация слоя объектов со store (wayback machine).
@@ -118,6 +200,9 @@ export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
     if (!existing) {
       const rect = createFabricObjectFromEntry(entry);
       rect.set({ opacity });
+      // объекты, восстановленные после перемотки времени, тоже не должны
+      // пересоздаваться при следующем reconcile (иначе потеряется размер)
+      markAsCreatedOnCanvas(rect);
       canvas.add(rect);
       continue;
     }
@@ -129,19 +214,18 @@ export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
       existing.set({ left: entry.x, top: entry.y });
     }
 
-    // Размер: объекты, созданные вручную на canvas (грядка drag'ом, метка кликом),
-    // никогда не пересоздаём — иначе сбрасывается размер, увеличенный рамкой
-    // трансформации (баг: «увеличил дерево → пересадил → отмотал год → квадратик»).
-    // Пересобираем только если размеры реально разошлись (загрузка .garden-файла).
-    if (!wasCreatedOnCanvas(existing)) {
-      const w = Math.max(existing.getScaledWidth(), 0);
-      const h = Math.max(existing.getScaledHeight(), 0);
-      if (Math.abs(w - entry.width) > 0.5 || Math.abs(h - entry.height) > 0.5) {
-        canvas.remove(existing);
-        const rect = createFabricObjectFromEntry(entry);
-        rect.set({ opacity });
-        canvas.add(rect);
-      }
+    // Размер: fabric-объекты никогда не пересоздаём — иначе сбрасывается
+    // размер, увеличенный пользователем рамкой трансформации (баг: «увеличил
+    // дерево → отмотал дату назад/вперёд → квадратик»). При расхождении
+    // размеров (например, загрузка .garden-файла) обновляем существующий
+    // объект инкрементально, сохраняя его идентичность и выделение.
+    const w = Math.max(existing.getScaledWidth(), 0);
+    const h = Math.max(existing.getScaledHeight(), 0);
+    if (Math.abs(w - entry.width) > 0.5 || Math.abs(h - entry.height) > 0.5) {
+      existing.set({
+        width: Math.max(entry.width / (existing.scaleX || 1), 1),
+        height: Math.max(entry.height / (existing.scaleY || 1), 1),
+      });
     }
   }
 
@@ -155,6 +239,9 @@ export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
   } else if (selectedId) {
     useGardenStore.getState().selectObject(null);
   }
+
+  // Пунктирные стрелки пересадок поверх слоя объектов
+  drawTransplantArrows(canvas);
 
   canvas.renderAll();
 }

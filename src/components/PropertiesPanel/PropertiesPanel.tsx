@@ -146,6 +146,18 @@ export default function PropertiesPanel() {
           </FieldRow>
         </div>
 
+        {/* Свойство «Пересажен» появляется только если объект действительно
+            был пересажен (есть связь с прежним местом). */}
+        {object.transplantedAt && (
+          <div className="rounded-md bg-indigo-50 border border-indigo-200 px-3 py-2 text-xs text-indigo-800 flex items-center gap-2">
+            <Move size={14} className="flex-shrink-0" />
+            <span>
+              Пересажен {formatDateRu(object.transplantedAt)}
+              {object.transplantedFromId ? ' — на схеме показана стрелка от прежнего места' : ''}
+            </span>
+          </div>
+        )}
+
         {object.removedAt && (
           <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
             Выкопан {formatDateRu(object.removedAt)} — не виден на схеме после этой даты
