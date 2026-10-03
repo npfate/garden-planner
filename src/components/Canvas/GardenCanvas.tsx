@@ -2,7 +2,7 @@ import { Canvas, Point, Rect } from 'fabric';
 import type { TPointerEvent, TPointerEventInfo, FabricObject } from 'fabric';
 import { useEffect, useRef } from 'react';
 import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
-import { isVisibleInYear } from '../../utils/wayback';
+import { isVisibleAt } from '../../utils/wayback';
 import type { ToolId } from '../../store/gardenStore';
 import type { GardenObject, GardenObjectType, IsoDate } from '../../types/garden';
 import { MARKER_SIZE, todayIso } from '../../utils/markers';
@@ -10,7 +10,9 @@ import { makeEvent } from '../../utils/wayback';
 import {
   createFabricObjectFromEntry,
   drawGrid,
+  drawTransplantHints,
   findObjectByGardenId,
+  isTransplantLine,
   markAsCreatedOnCanvas,
   reconcileObjectsWithStore,
   getGardenId,
@@ -161,6 +163,15 @@ export default function GardenCanvas() {
     const selectByObject = (obj: FabricObject | null | undefined): void => {
       const id = obj ? getGardenId(obj) : null;
       useGardenStore.getState().selectObject(id);
+      // Подсказки пересадки (стрелка + «призрак» прежнего места) зависят от
+      // выбора — обновляем сразу при клике/снятии выделения.
+      if (id) drawTransplantHints(canvas);
+      else {
+        for (const o of [...canvas.getObjects()]) {
+          if (isTransplantLine(o)) canvas.remove(o);
+        }
+        canvas.renderAll();
+      }
     };
 
     const onWheel = (opt: TPointerEventInfo<TPointerEvent>): void => {
@@ -530,12 +541,34 @@ export default function GardenCanvas() {
   // или изменении набора видимых объектов (загрузка проекта, добавление/удаление).
   const currentYear = useGardenStore((s) => s.currentYear);
   const viewDate = useGardenStore((s) => s.viewDate);
-  const visibleIds = useGardenStore((s) =>
-    s.objects.filter((o) => isVisibleInYear(o, s.currentYear)).map((o) => o.id).join(','),
-  );
+  // В подписке считаем «актуальное место» для цепочек пересадок: промежуточные
+  // места скрыты, пока следующая запись цепочки жива (см. visibleObjects).
+  const visibleIds = useGardenStore((s) => {
+    const byId = new Map(s.objects.map((o) => [o.id, o]));
+    const now = s.viewDate ?? `${s.currentYear}-12-31`;
+    return s.objects
+      .filter((o) => {
+        if (!isVisibleAt(o, s.currentYear, s.viewDate)) return false;
+        if (o.transplantedToId) {
+          const next = byId.get(o.transplantedToId);
+          // следующее место цепочки живо — старое не показываем
+          if (next && (!next.removedAt || next.removedAt >= now)) return false;
+        }
+        return true;
+      })
+      .map((o) => o.id)
+      .join(',');
+  });
   useEffect(() => {
     if (fabricRef.current) reconcileObjectsWithStore(fabricRef.current);
   }, [visibleIds, currentYear, viewDate]);
+
+  // Подсказки пересадки зависят от выбора объекта (клик по пересаженному —
+  // показать стрелку и «призрак» прежнего места; снятие выделения — убрать).
+  const selectedObjectId = useGardenStore((s) => s.selectedObjectId);
+  useEffect(() => {
+    if (fabricRef.current) drawTransplantHints(fabricRef.current);
+  }, [selectedObjectId]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-background">

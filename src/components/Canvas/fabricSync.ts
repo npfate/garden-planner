@@ -3,7 +3,7 @@ import type { Canvas as FabricCanvas, FabricObject } from 'fabric';
 import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
 import type { GardenObject } from '../../types/garden';
 import { MARKER_SIZE, getMarkerColor } from '../../utils/markers';
-import { isVisibleInYear, lifeBounds } from '../../utils/wayback';
+import { isVisibleInYear } from '../../utils/wayback';
 
 export const GRID_COLOR = '#E5E7EB';
 export const PIXELS_PER_METER = 50;
@@ -112,35 +112,64 @@ function objectCenter(o: GardenObject): { x: number; y: number } {
   return { x: o.x + o.width / 2, y: o.y + o.height / 2 };
 }
 
-// Перерисовка пунктирных стрелок для всех пересадок, «актуальных» на
-// текущий момент времени wayback-машины: старое место полупрозрачно,
-// новое — ярче. Вызывается из reconcile при каждом изменении слоя объектов.
-export function drawTransplantArrows(canvas: FabricCanvas): void {
+// Подсказки пересадки: рисуем ТОЛЬКО когда пользователь кликнул (выбрал)
+// пересаженный объект. Набор: тонкая пунктирная стрелка «откуда → куда» +
+// бледный пунктирный «призрак» прежнего места (сохранённые размеры). При
+// drag'е объекта reconcile перерисовывает подсказки, поэтому стрелка
+// следует за объектом.
+export function drawTransplantHints(canvas: FabricCanvas): void {
   for (const obj of [...canvas.getObjects()]) {
     if (isTransplantLine(obj)) canvas.remove(obj);
   }
 
-  const { objects, currentYear, viewDate } = useGardenStore.getState();
+  const { objects, selectedObjectId } = useGardenStore.getState();
+  if (!selectedObjectId) return;
   const byId = new Map(objects.map((o) => [o.id, o]));
 
-  for (const target of objects) {
-    if (!target.transplantedFromId || !target.transplantedAt) continue;
+  // Цепочка пересадок от выбранного объекта назад (в т.ч. если выбран
+  // «призрак» промежуточного места — идём от него тоже).
+  const targets = new Set<string>();
+  let cur = byId.get(selectedObjectId);
+  while (cur) {
+    if (cur.transplantedFromId && cur.transplantedAt) {
+      targets.add(cur.id);
+      cur = byId.get(cur.transplantedFromId);
+    } else {
+      break;
+    }
+  }
+
+  for (const targetId of targets) {
+    const target = byId.get(targetId);
+    if (!target?.transplantedFromId || !target.transplantedAt) continue;
     const source = byId.get(target.transplantedFromId);
     if (!source) continue;
-    // стрелку показываем, когда хотя бы одно из мест видно в этот момент времени
-    const targetVisible = isVisibleInYear(target, currentYear);
-    const sourceVisible = isVisibleInYear(source, currentYear);
-    if (!targetVisible && !sourceVisible) continue;
-    if (viewDate) {
-      const tb = lifeBounds(target);
-      const sb = lifeBounds(source);
-      const tVis = !(tb.start > viewDate || (tb.end !== null && tb.end <= viewDate));
-      const sVis = !(sb.start > viewDate || (sb.end !== null && sb.end <= viewDate));
-      if (!tVis && !sVis) continue;
-    }
 
     const from = objectCenter(source);
     const to = objectCenter(target);
+
+    // «Призрак» прежнего места: бледный, пунктирный контур тех же размеров.
+    const ghostW = Math.max(source.width, 1);
+    const ghostH = Math.max(source.height, 1);
+    const ghost = new Rect({
+      left: source.x,
+      top: source.y,
+      width: ghostW,
+      height: ghostH,
+      originX: 'left',
+      originY: 'top',
+      fill: 'rgba(99, 102, 241, 0.08)',
+      stroke: '#6366F1',
+      strokeWidth: 1,
+      strokeDashArray: [5, 4],
+      opacity: 0.45,
+      selectable: false,
+      evented: false,
+    });
+    if (source.rotation) ghost.set({ angle: source.rotation });
+    markAsTransplantLine(ghost);
+    canvas.add(ghost);
+
     const line = new Line([from.x, from.y, to.x, to.y], {
       stroke: '#6366F1',
       strokeWidth: 1.5,
@@ -240,8 +269,10 @@ export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
     useGardenStore.getState().selectObject(null);
   }
 
-  // Пунктирные стрелки пересадок поверх слоя объектов
-  drawTransplantArrows(canvas);
+  // Пунктирные подсказки пересадки (стрелка + «призрак» прежнего места) —
+  // только для выбранного объекта; перерисовываются при каждом reconcile,
+  // поэтому стрелка следует за объектом во время drag'а.
+  drawTransplantHints(canvas);
 
   canvas.renderAll();
 }

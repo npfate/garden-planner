@@ -48,6 +48,17 @@ export function isVisibleInYear(obj: GardenObject, year: number): boolean {
   return true;
 }
 
+// Виден ли объект «на этот момент времени» (год + опциональная точная дата).
+// viewDate === null — годовой режим (смотрим на конец года).
+export function isVisibleAt(obj: GardenObject, year: number, viewDate?: IsoDate | null): boolean {
+  if (!isVisibleInYear(obj, year)) return false;
+  if (!viewDate) return true;
+  const { start, end } = lifeBounds(obj);
+  if (obj.plantedAt && start > viewDate) return false; // ещё не посажен на эту дату
+  if (obj.removedAt && end && end <= viewDate) return false; // уже выкопан
+  return true;
+}
+
 // --- Журнал активности (лента «как на GitHub») ---
 
 let eventSeq = 0;

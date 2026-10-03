@@ -56,6 +56,16 @@ export type GardenStore = GardenState & GardenActions;
 
 const CURRENT_YEAR_DEFAULT = 2024;
 
+// Момент «сейчас» для годового режима (viewDate === null): конец выбранного года.
+function nowOf(viewDate: IsoDate | null, year?: number): string {
+  return viewDate ?? `${year ?? CURRENT_YEAR_DEFAULT}-12-31`;
+}
+
+// Выкопан ли объект к указанной дате (removedAt строго раньше даты).
+function isDugBy(date: string, o: GardenObject): boolean {
+  return !!o.removedAt && o.removedAt < date;
+}
+
 export const useGardenStore = create<GardenStore>((set, get) => ({
   objects: [],
   currentYear: CURRENT_YEAR_DEFAULT,
@@ -200,10 +210,22 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   },
 
   // Объекты, видимые «на этот момент времени» (год + опциональная дата).
+  // Правило пересадок: у объекта, который был пересажен (transplantedToId),
+  // «живёт» только последняя запись цепочки — промежуточные места сами по
+  // себе на схеме не показываются (их видно через стрелку-подсказку при
+  // клике на актуальный объект). Если же пересаженный объект позже выкопан
+  // («выкопать» без новой посадки), его старое место снова становится
+  // актуальным и рисуется.
   visibleObjects: (): GardenObject[] => {
     const { objects, currentYear, viewDate } = get();
+    const byId = new Map(objects.map((o) => [o.id, o]));
     return objects.filter((o) => {
       if (!isVisibleInYear(o, currentYear)) return false;
+      if (o.transplantedToId) {
+        const next = byId.get(o.transplantedToId);
+        const nextStillAlive = !!next && !isDugBy(nowOf(viewDate, currentYear), next);
+        if (next && nextStillAlive) return false; // показываем только последнее место
+      }
       if (viewDate) {
         const { start, end } = lifeBounds(o);
         if (o.plantedAt && start > viewDate) return false; // ещё не посажен на эту дату
