@@ -13,6 +13,8 @@ export interface GardenFileSnapshot {
   events: ActivityEvent[];
   backgroundImage: string | null;
   currentYear: number;
+  // Wayback: дата просмотра на момент сохранения (не обязательна в старых файлах)
+  viewDate?: IsoDate | null;
   scale: number;
   snapToGrid: boolean;
   activeTool: ToolId;
@@ -102,9 +104,12 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     // Выкопка (soft-delete): removedAt = дата *последнего дня жизни* —
     // объект исчезает со схемы начиная со следующего дня после этой даты,
     // но остаётся в истории (можно отматать назад и увидеть, что он рос здесь).
-    // Если дата выкопки уже стоит и она раньше сегодняшней — не затираем:
+    // Дата берётся из текущего момента просмотра (wayback), а не системных
+    // часов: если смотрим на сад, например, на 4 августа и нажимаем «выкопать»,
+    // дерево должно пропасть с 5-го числа именно того года, который открыт.
+    // Если дата выкопки уже стоит и она раньше выбранной — не затираем:
     // иначе «выкопанное в мае» внезапно ожило бы к августу.
-    const date = todayIso();
+    const date = momentOf(get().viewDate);
     set((state) => ({
       objects: state.objects.map((o) =>
         o.id === id && (!o.removedAt || o.removedAt > date) ? { ...o, removedAt: date } : o,
@@ -269,6 +274,7 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       events: state.events,
       backgroundImage: cs.backgroundImage,
       currentYear: state.currentYear,
+      viewDate: state.viewDate,
       scale: cs.scale,
       snapToGrid: cs.snapToGrid,
       activeTool: cs.activeTool,
@@ -287,7 +293,13 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       const events: ActivityEvent[] = Array.isArray(p.events) ? p.events : [];
       const currentYear: number =
         typeof p.currentYear === 'number' ? p.currentYear : CURRENT_YEAR_DEFAULT;
-      set({ objects, events, currentYear, viewDate: null, selectedObjectId: null });
+      // Восстанавливаем дату просмотра из снапшота (если она валидная) —
+      // иначе после F5 wayback-состояние терялось и объекты «пропадали».
+      const viewDate: IsoDate | null =
+        typeof p.viewDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.viewDate)
+          ? (p.viewDate as IsoDate)
+          : null;
+      set({ objects, events, currentYear, viewDate, selectedObjectId: null });
 
       const cs = useCanvasStore.getState();
       if (typeof p.backgroundImage === 'string') cs.setBackgroundImage(p.backgroundImage);
