@@ -5,6 +5,12 @@ import { formatDateRu, isoYear, todayIso } from '../utils/markers';
 import { isVisibleAt, isVisibleInYear, lifeBounds, makeEvent, momentOf } from '../utils/wayback';
 import { ACTIVITY_META } from '../config/activity';
 
+// Поиск fabric-объекта по garden-id. Локальный хелпер (в components/Canvas/fabricSync
+// такая же функция есть, но импорт оттуда создал бы цикл store -> components).
+function findFabricObjectByGardenId(canvas: FabricCanvas, id: string) {
+  return canvas.getObjects().find((o) => (o as unknown as Record<string, unknown>).__gardenObjectId === id);
+}
+
 // Инструменты тулбара + динамические инструменты размещения из Библиотеки
 // объектов: 'place:<itemId>' (см. src/constants/objectLibrary.ts).
 export type ToolId = 'select' | 'pan' | 'bed' | 'tree' | `place:${string}`;
@@ -54,6 +60,8 @@ interface GardenActions {
   setYear: (year: number) => void;
   setViewDate: (date: IsoDate | null) => void;
   selectObject: (id: string | null) => void;
+  /** Фокус камеры на объекте из Инвентаря: выделить, отцентрировать вьюпорт. */
+  focusOnObject: (id: string) => void;
   setCanvas: (canvas: FabricCanvas | null) => void;
   visibleObjects: () => GardenObject[];
   saveToFile: () => string;
@@ -239,6 +247,35 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
 
   selectObject: (id: string | null): void => {
     set({ selectedObjectId: id });
+  },
+
+  // Фокус камеры по клику в Инвентаре. Реализация через fabric-объект, если он
+  // есть на холсте; иначе — по координатам из стора (объект может быть скрыт
+  // wayback-фильтром, но камера всё равно покажет его место).
+  focusOnObject: (id: string): void => {
+    const state = get();
+    set({ selectedObjectId: id });
+    const canvas = state.canvas;
+    if (!canvas) return;
+    let cx: number;
+    let cy: number;
+    const fabricObj = findFabricObjectByGardenId(canvas, id);
+    if (fabricObj) {
+      const center = fabricObj.getCenterPoint();
+      cx = center.x;
+      cy = center.y;
+      canvas.setActiveObject(fabricObj);
+    } else {
+      const entry = state.objects.find((o) => o.id === id);
+      if (!entry) return;
+      cx = entry.x + entry.width / 2;
+      cy = entry.y + entry.height / 2;
+    }
+    const vpt = canvas.viewportTransform;
+    if (!vpt) return;
+    vpt[4] = (canvas.getWidth() ?? 0) / 2 - cx * vpt[0];
+    vpt[5] = (canvas.getHeight() ?? 0) / 2 - cy * vpt[3];
+    canvas.requestRenderAll();
   },
 
   setCanvas: (canvas: FabricCanvas | null): void => {

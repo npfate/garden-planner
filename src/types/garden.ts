@@ -64,6 +64,11 @@ export interface GardenObject {
   varieties: Variety[];
   history: Record<number, YearHistoryEntry>;
   customIcon?: string | null;
+  // Идентификатор шаблона из Библиотеки объектов (src/constants/objectLibrary).
+  // Позволяет сгруппировать экземпляры по типу («все яблони») в Инвентаре.
+  libraryItemId?: string | null;
+  // Дефолт из Библиотеки объектов: диаметр кроны/габарита (в метрах).
+  crownDiameter?: number;
   // Wayback machine: жизненный цикл (по умолчанию многолетник) и календарные даты.
   lifecycle?: PlantLifecycle;
   plantedAt?: IsoDate | null; // дата посадки (май, август и т.д.)

@@ -7,6 +7,8 @@ import type { ToolId } from '../../store/gardenStore';
 import type { GardenObject, GardenObjectType, IsoDate } from '../../types/garden';
 import { MARKER_SIZE, todayIso } from '../../utils/markers';
 import { makeEvent } from '../../utils/wayback';
+import { getLibraryItem, LIBRARY_ITEMS_FLAT } from '../../constants/objectLibrary';
+import { PIXELS_PER_METER } from './fabricSync';
 import {
   createFabricObjectFromEntry,
   drawGrid,
@@ -23,6 +25,15 @@ import {
   syncFabricObjectToStore,
 } from './fabricSync';
 
+// Эмодзи-маркеры плодовых/декоративных деревьев (для типов 'tree').
+const EMOJI_BY_LIBRARY_ID: Record<string, string> = {};
+for (const it of LIBRARY_ITEMS_FLAT) {
+  if (it.category === 'fruit_tree') EMOJI_BY_LIBRARY_ID[it.id] = '🍎';
+  else if (it.category === 'bush') EMOJI_BY_LIBRARY_ID[it.id] = '🌿';
+  else if (it.category === 'flower') EMOJI_BY_LIBRARY_ID[it.id] = '🌸';
+  else if (it.category === 'shrub') EMOJI_BY_LIBRARY_ID[it.id] = '🌳';
+}
+
 const ZOOM_FACTOR = 1.1;
 const MIN_SCALE = 10;
 const MAX_SCALE = 500;
@@ -38,8 +49,11 @@ function createGardenObjectEntry(
   height = MARKER_SIZE,
   customIcon?: string | null,
   plantedAt?: IsoDate,
+  libraryItemId?: string,
 ): GardenObject {
   const now = new Date().toISOString();
+  // Дефолты из Библиотеки объектов: многолетник/однолетник и размер кроны.
+  const tpl = libraryItemId ? getLibraryItem(libraryItemId) : undefined;
   return {
     id: crypto.randomUUID(),
     type,
@@ -53,7 +67,9 @@ function createGardenObjectEntry(
     varieties: [],
     history: { [year]: { harvest: 0 } },
     customIcon: customIcon ?? null,
-    lifecycle: 'perennial',
+    libraryItemId: libraryItemId ?? null,
+    lifecycle: tpl?.defaultProperties.lifecycle === 'annual' ? 'annual' : 'perennial',
+    crownDiameter: typeof tpl?.defaultProperties.crownDiameter === 'number' ? tpl.defaultProperties.crownDiameter : undefined,
     plantedAt: plantedAt ?? todayIso(),
     createdAt: now,
     updatedAt: now,
@@ -74,7 +90,7 @@ function cursorsForTool(canvas: Canvas, tool: ToolId, spacePressed: boolean): vo
     canvas.moveCursor = 'grab';
     return;
   }
-  if (tool === 'bed' || tool === 'tree') {
+  if (tool === 'bed' || tool === 'tree' || tool.startsWith('place:')) {
     canvas.defaultCursor = 'crosshair';
     canvas.hoverCursor = 'crosshair';
     canvas.moveCursor = 'crosshair';
@@ -271,18 +287,47 @@ export default function GardenCanvas() {
     };
 
     const placeTreeMarker = (pointer: Point, plantDate?: string | null): void => {
+      placeMarkerEntry('tree', 'Яблоня', MARKER_SIZE, pointer, plantDate ?? undefined);
+    };
+
+    // Размещение произвольного шаблона из Библиотеки объектов ('place:<itemId>').
+    const placeLibraryItem = (pointer: Point, itemId: string): void => {
+      const tpl = getLibraryItem(itemId);
+      if (!tpl) return;
+      const dp = tpl.defaultProperties;
+      const defW = typeof dp.width === 'number' ? dp.width : undefined;
+      const defH = typeof dp.height === 'number' ? dp.height : undefined;
+      const crown = typeof dp.crownDiameter === 'number' ? dp.crownDiameter : undefined;
+      const widthPx = defW !== undefined ? defW * PIXELS_PER_METER : crown !== undefined ? crown * PIXELS_PER_METER : MARKER_SIZE;
+      const heightPx = defH !== undefined ? defH * PIXELS_PER_METER : crown !== undefined ? crown * PIXELS_PER_METER : MARKER_SIZE;
+      const emoji = tpl.objectType === 'tree' ? EMOJI_BY_LIBRARY_ID[itemId] ?? '🌳' : null;
+      placeMarkerEntry(tpl.objectType, tpl.name, widthPx, pointer, undefined, heightPx, emoji, itemId);
+    };
+
+    // Общий путь создания записи + fabric-объекта (дерево/метка/шаблон библиотеки).
+    const placeMarkerEntry = (
+      type: GardenObjectType,
+      name: string,
+      width: number,
+      pointer: Point,
+      plantDate?: string,
+      height?: number,
+      customIcon?: string | null,
+      libraryItemId?: string,
+    ): void => {
       const snapped = getSnapPoint(pointer.x, pointer.y);
       const gs = useGardenStore.getState();
       const entry = createGardenObjectEntry(
-        'tree',
-        'Яблоня',
+        type,
+        name,
         gs.currentYear,
         snapped.x,
         snapped.y,
-        MARKER_SIZE,
-        MARKER_SIZE,
-        '🍎',
-        plantDate ?? undefined,
+        width,
+        height ?? width,
+        customIcon,
+        plantDate,
+        libraryItemId,
       );
       gs.addObject(entry);
 
@@ -292,7 +337,7 @@ export default function GardenCanvas() {
       canvas.setActiveObject(marker);
       selectByObject(marker);
       canvas.renderAll();
-      // Инструмент остаётся активным — можно ставить несколько деревьев подряд.
+      // Инструмент остаётся активным — можно ставить несколько объектов подряд.
     };
 
     const handleMouseDown = (event: TPointerEventInfo<TPointerEvent>): void => {
@@ -369,6 +414,12 @@ export default function GardenCanvas() {
 
       if (tool === 'tree') {
         placeTreeMarker(canvas.getScenePoint(event.e), useGardenStore.getState().viewDate);
+        return;
+      }
+
+      // Инструменты размещения из Библиотеки объектов: 'place:<itemId>'.
+      if (tool.startsWith('place:')) {
+        placeLibraryItem(canvas.getScenePoint(event.e), tool.slice('place:'.length));
       }
     };
 
@@ -423,7 +474,8 @@ export default function GardenCanvas() {
         bedDraftRef.current = null;
         canvas.renderAll();
       }
-      if (activeToolRef.current === 'bed' || activeToolRef.current === 'tree') {
+      const t = activeToolRef.current;
+      if (t === 'bed' || t === 'tree' || t.startsWith('place:')) {
         useCanvasStore.getState().setActiveTool('select');
       }
     };
@@ -526,7 +578,7 @@ export default function GardenCanvas() {
     canvas.selection = activeTool === 'select';
     cursorsForTool(canvas, activeTool, isSpacePressedRef.current);
 
-    if (activeTool === 'bed' || activeTool === 'tree' || activeTool === 'pan') {
+    if (activeTool === 'bed' || activeTool === 'tree' || activeTool === 'pan' || activeTool.startsWith('place:')) {
       if (bedDraftRef.current?.preview) {
         canvas.remove(bedDraftRef.current.preview);
         bedDraftRef.current = null;
