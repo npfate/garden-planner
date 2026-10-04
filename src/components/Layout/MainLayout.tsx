@@ -8,7 +8,7 @@ import { useCanvasStore } from '../../store/gardenStore';
 const PAGE_TITLES: Record<string, string> = {
   '/inventory': 'Инвентарь',
   '/reports': 'Отчёты',
-  '/diary': 'Записи',
+  '/diary': 'История сада',
   '/planner': 'Планировщик',
   '/settings': 'Настройки',
 };

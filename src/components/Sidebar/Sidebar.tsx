@@ -18,7 +18,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Схема', icon: LayoutGrid },
   { to: '/inventory', label: 'Инвентарь', icon: Package },
   { to: '/reports', label: 'Отчёты', icon: BarChart3 },
-  { to: '/diary', label: 'Записи', icon: Notebook },
+  { to: '/diary', label: 'История', icon: Notebook },
   { to: '/planner', label: 'Планировщик', icon: CalendarDays },
   { to: '/settings', label: 'Настройки', icon: Settings },
 ];

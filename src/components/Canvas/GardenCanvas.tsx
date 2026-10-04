@@ -212,10 +212,21 @@ export default function GardenCanvas() {
       const id = getGardenId(activeObj);
       const before = id ? useGardenStore.getState().objects.find((o) => o.id === id) : undefined;
       syncFabricObjectToStore(activeObj);
-      // Событие «перемещение» в журнал (wayback machine) — только если реально сдвинули
-      if (before && (Math.abs(before.x - (activeObj.left ?? 0)) > 1 || Math.abs(before.y - (activeObj.top ?? 0)) > 1)) {
+      if (!before) return;
+      // События в журнал (wayback machine): отдельно перемещение и отдельно resize.
+      const movedFlag =
+        Math.abs(before.x - (activeObj.left ?? 0)) > 1 || Math.abs(before.y - (activeObj.top ?? 0)) > 1;
+      const w = Math.round(activeObj.getScaledWidth());
+      const h = Math.round(activeObj.getScaledHeight());
+      const resizedFlag = Math.abs((before.width ?? 0) - w) > 1 || Math.abs((before.height ?? 0) - h) > 1;
+      if (movedFlag) {
         useGardenStore.getState().addEvent(
           makeEvent('moved', before, `Перемещено: ${before.name} → (${Math.round(activeObj.left ?? 0)}; ${Math.round(activeObj.top ?? 0)})`),
+        );
+      }
+      if (resizedFlag) {
+        useGardenStore.getState().addEvent(
+          makeEvent('resized', before, `Изменён размер: ${before.name} → ${w}×${h}`),
         );
       }
     };
