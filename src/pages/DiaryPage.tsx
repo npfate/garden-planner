@@ -6,7 +6,7 @@ import { groupEventsByDay } from '../utils/wayback';
 // Метаданные событий и настройки тепловой карты — единый источник из config.
 // Новые типы событий / пороги / цвета добавляются в src/config/activity.ts,
 // этот компонент менять не нужно.
-import { ACTIVITY_META, ACTIVITY_ORDER, heatmapCellClass } from '../config/activity';
+import { ACTIVITY_META, ACTIVITY_ORDER, FALLBACK_ICON, heatmapCellClass } from '../config/activity';
 
 // Тепловая сетка «как на GitHub»: столбцы — недели, строки — дни недели.
 // Пороги/цвета читаются из config/activity.ts (HEATMAP_LEVELS) — настраивается там же.
@@ -143,7 +143,14 @@ export default function DiaryPage() {
             <h2 className="text-sm font-semibold text-text-primary mb-2">{formatDateRu(group.date)}</h2>
             <ul className="space-y-2">
               {group.events.map((ev) => {
-                const meta = ACTIVITY_META[ev.kind];
+                // Защита от legacy-снапшотов (localStorage / старые .garden), где kind
+                // мог отсутствовать или иметь имя из ранней схемы ('created', 'deleted').
+                const meta =
+                  ACTIVITY_META[ev.kind] ?? {
+                    icon: FALLBACK_ICON,
+                    label: ev.details.slice(0, 40),
+                    className: 'bg-gray-100 text-gray-700',
+                  };
                 const Icon = meta.icon;
                 return (
                   <li

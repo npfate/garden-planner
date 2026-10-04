@@ -3,6 +3,7 @@ import type { Canvas as FabricCanvas } from 'fabric';
 import type { ActivityEvent, GardenObject, IsoDate } from '../types/garden';
 import { formatDateRu, isoYear, todayIso } from '../utils/markers';
 import { isVisibleAt, isVisibleInYear, lifeBounds, makeEvent, momentOf } from '../utils/wayback';
+import { ACTIVITY_META } from '../config/activity';
 
 export type ToolId = 'select' | 'pan' | 'bed' | 'tree';
 
@@ -290,7 +291,22 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       }
       const p = parsed as Partial<GardenFileSnapshot>;
       const objects: GardenObject[] = Array.isArray(p.objects) ? p.objects : [];
-      const events: ActivityEvent[] = Array.isArray(p.events) ? p.events : [];
+      // Миграция legacy-снапшотов (старый localStorage / .garden): события могли
+      // содержать kind из ранней схемы ('created', 'deleted') или без kind вовсе.
+      // Маппим в актуальную ActivityKind, иначе UI падает на неизвестном ключе.
+      const LEGACY_KIND_MAP: Record<string, ActivityEvent['kind']> = {
+        created: 'planted',
+        deleted: 'destroyed',
+        add: 'planted',
+        remove: 'destroyed',
+        transplant: 'moved',
+      };
+      const rawEvents: ActivityEvent[] = Array.isArray(p.events) ? p.events : [];
+      const events: ActivityEvent[] = rawEvents.map((ev) => {
+        if (ev && ACTIVITY_META[ev.kind]) return ev;
+        const mapped = ev && LEGACY_KIND_MAP[String(ev.kind)] ? LEGACY_KIND_MAP[String(ev.kind)] : 'note';
+        return { ...ev, kind: mapped };
+      });
       const currentYear: number =
         typeof p.currentYear === 'number' ? p.currentYear : CURRENT_YEAR_DEFAULT;
       // Восстанавливаем дату просмотра из снапшота (если она валидная) —
