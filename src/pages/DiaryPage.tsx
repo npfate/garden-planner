@@ -21,22 +21,25 @@ function Heatmap({ events, year }: { events: ActivityEvent[]; year: number }) {
   }, [events, year]);
 
   const weeks = useMemo(() => {
-    // Первый столбец начинается с недели, содержащей 1 января.
-    const start = new Date(year, 0, 1);
-    start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // понедельник недели 1 января
+    // Скользящее окно из 53 недель (как на GitHub): последние ~полгода включают
+    // текущий год, даже если он только начался. Дни будущего не показываются.
+    const today = new Date();
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (end.getFullYear() < year) end.setFullYear(year, 11, 31);
+    if (end.getFullYear() > year) end.setFullYear(year, 0, 1);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 52 * 7 - ((end.getDay() + 6) % 7)); // выровнять на понедельник
     const result: { date: string | null }[][] = [];
     const cursor = new Date(start);
-    while (cursor.getFullYear() <= year) {
+    while (cursor <= end || cursor.getDay() !== 1) {
       const week: { date: string | null }[] = [];
       for (let dow = 0; dow < 7; dow += 1) {
-        const inYear = cursor.getFullYear() === year;
-        const m = String(cursor.getMonth() + 1).padStart(2, '0');
-        const d = String(cursor.getDate()).padStart(2, '0');
-        week.push({ date: inYear ? `${year}-${m}-${d}` : null });
+        const iso = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+        const visible = cursor.getFullYear() === year && cursor <= end;
+        week.push({ date: visible ? iso : null });
         cursor.setDate(cursor.getDate() + 1);
       }
       result.push(week);
-      if (cursor.getFullYear() > year) break;
     }
     return result;
   }, [year]);
