@@ -5,7 +5,9 @@ import { formatDateRu, isoYear, todayIso } from '../utils/markers';
 import { isVisibleAt, isVisibleInYear, lifeBounds, makeEvent, momentOf } from '../utils/wayback';
 import { ACTIVITY_META } from '../config/activity';
 
-export type ToolId = 'select' | 'pan' | 'bed' | 'tree';
+// Инструменты тулбара + динамические инструменты размещения из Библиотеки
+// объектов: 'place:<itemId>' (см. src/constants/objectLibrary.ts).
+export type ToolId = 'select' | 'pan' | 'bed' | 'tree' | `place:${string}`;
 
 export interface GardenFileSnapshot {
   version: number;
