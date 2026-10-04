@@ -84,9 +84,13 @@ export default function Toolbar() {
           <button
             key={id}
             type="button"
-            title={label}
+            title={
+              id === 'bed' || id === 'tree'
+                ? `${label} — несколько подряд; Esc или повторный клик по кнопке — выход (Shift+drag — двигать объект)`
+                : label
+            }
             aria-label={label}
-            onClick={() => setActiveTool(id)}
+            onClick={() => setActiveTool(activeTool === id ? 'select' : id)}
             className={`${btnClass} ${activeTool === id ? 'bg-primary text-white border-primary' : ''}`}
           >
             <Icon size={18} />

@@ -1,8 +1,9 @@
-import { FabricImage, Group, Line, Rect } from 'fabric';
+import { FabricImage, Group, Line, Rect, Triangle } from 'fabric';
 import type { Canvas as FabricCanvas, FabricObject } from 'fabric';
 import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
 import type { GardenObject } from '../../types/garden';
 import { MARKER_SIZE, getMarkerColor } from '../../utils/markers';
+import { isVisibleInYear } from '../../utils/wayback';
 
 export const GRID_COLOR = '#E5E7EB';
 export const PIXELS_PER_METER = 50;
@@ -42,56 +43,236 @@ export function findObjectByGardenId(canvas: FabricCanvas, id: string): FabricOb
   return canvas.getObjects().find((o) => getGardenId(o) === id);
 }
 
-export function createMarkerRect(entry: GardenObject): Rect {
+// Runtime-флаг: fabric-объект создан «вручную» на canvas (грядка drag'ом,
+// метка кликом). Такие объекты не пересоздаём при reconcile — иначе сбрасывается
+// размер, увеличенный пользователем рамкой трансформации.
+const CREATED_FLAG_KEY = '__gardenCreatedOnCanvas';
+
+export function markAsCreatedOnCanvas(obj: FabricObject): void {
+  (obj as unknown as Record<string, unknown>)[CREATED_FLAG_KEY] = true;
+}
+
+// Создание fabric-объекта для записи store.
+// Размеры всегда берутся из записи (пользователь может увеличить объект
+// рамкой трансформации — значения сохраняются в store при object:modified).
+export function createFabricObjectFromEntry(entry: GardenObject): Rect {
+  const isBed = entry.type === 'bed';
+  // Для ВСЕХ типов берём сохранённые пользователем размеры из store
+  // (раньше немаркированные объекты строились фиксированным MARKER_SIZE —
+  //  из-за этого увеличенное дерево после перемотки даты становилось «квадратиком»).
+  const width = Math.max(entry.width, 1);
+  const height = Math.max(entry.height, 1);
+
+  // Метка, посаженная кликом, имеет размер MARKER_SIZE и рисуется как точка
+  // (origin center); увеличенная рамкой — уже полноценный прямоугольник.
+  const isMarkerSize = !isBed && width <= MARKER_SIZE + 0.5 && height <= MARKER_SIZE + 0.5;
+
   const rect = new Rect({
     left: entry.x,
     top: entry.y,
-    width: MARKER_SIZE,
-    height: MARKER_SIZE,
-    fill: getMarkerColor(entry.type),
-    stroke: '#FFFFFF',
-    strokeWidth: 1,
-    originX: 'center',
-    originY: 'center',
+    width,
+    height,
+    originX: isMarkerSize ? 'center' : 'left',
+    originY: isMarkerSize ? 'center' : 'top',
     selectable: true,
     evented: true,
+    objectCaching: false,
+    ...(isBed
+      ? {
+          fill: 'rgba(76, 175, 80, 0.2)',
+          stroke: '#4CAF50',
+          strokeWidth: 2,
+        }
+      : {
+          fill: getMarkerColor(entry.type),
+          stroke: '#FFFFFF',
+          strokeWidth: 1,
+        }),
   });
+  if (entry.rotation) rect.set({ angle: entry.rotation });
   setGardenId(rect, entry.id);
   return rect;
 }
 
-// Полная синхронизация слоя объектов canvas со списком objects из store.
-// Вызывается при загрузке файла и переключении года.
-export function syncMarkersFromStore(canvas: FabricCanvas): void {
-  const { objects, currentYear } = useGardenStore.getState();
+// --- Стрелки пересадок (пунктир «откуда → куда») ---
 
-  // Удаляем все garden-объекты (сетку/фон не трогаем)
+const TRANSPLANT_FLAG_KEY = '__gardenTransplantLine';
+
+export function isTransplantLine(obj: FabricObject): boolean {
+  return (obj as unknown as Record<string, unknown>)[TRANSPLANT_FLAG_KEY] === true;
+}
+
+function markAsTransplantLine(obj: FabricObject): void {
+  (obj as unknown as Record<string, unknown>)[TRANSPLANT_FLAG_KEY] = true;
+}
+
+// Центр «визуального» объекта: метка-точка рисуется с origin center,
+// прямоугольник (грядка/увеличенный объект) — с origin left/top.
+function objectCenter(o: GardenObject): { x: number; y: number } {
+  return { x: o.x + o.width / 2, y: o.y + o.height / 2 };
+}
+
+// Подсказки пересадки: рисуем ТОЛЬКО когда пользователь кликнул (выбрал)
+// пересаженный объект. Набор: тонкая пунктирная стрелка «откуда → куда» +
+// бледный пунктирный «призрак» прежнего места (сохранённые размеры). При
+// drag'е объекта reconcile перерисовывает подсказки, поэтому стрелка
+// следует за объектом.
+export function drawTransplantHints(canvas: FabricCanvas): void {
   for (const obj of [...canvas.getObjects()]) {
-    if (getGardenId(obj)) canvas.remove(obj);
+    if (isTransplantLine(obj)) canvas.remove(obj);
   }
 
-  const visibleIds = new Set<string>();
+  const { objects, selectedObjectId } = useGardenStore.getState();
+  if (!selectedObjectId) return;
+  const byId = new Map(objects.map((o) => [o.id, o]));
 
-  for (const entry of objects) {
+  // Цепочка пересадок от выбранного объекта назад (в т.ч. если выбран
+  // «призрак» промежуточного места — идём от него тоже).
+  const targets = new Set<string>();
+  let cur = byId.get(selectedObjectId);
+  while (cur) {
+    if (cur.transplantedFromId && cur.transplantedAt) {
+      targets.add(cur.id);
+      cur = byId.get(cur.transplantedFromId);
+    } else {
+      break;
+    }
+  }
+
+  for (const targetId of targets) {
+    const target = byId.get(targetId);
+    if (!target?.transplantedFromId || !target.transplantedAt) continue;
+    const source = byId.get(target.transplantedFromId);
+    if (!source) continue;
+
+    const from = objectCenter(source);
+    const to = objectCenter(target);
+
+    // «Призрак» прежнего места: бледный, пунктирный контур тех же размеров.
+    const ghostW = Math.max(source.width, 1);
+    const ghostH = Math.max(source.height, 1);
+    const ghost = new Rect({
+      left: source.x,
+      top: source.y,
+      width: ghostW,
+      height: ghostH,
+      originX: 'left',
+      originY: 'top',
+      fill: 'rgba(99, 102, 241, 0.08)',
+      stroke: '#6366F1',
+      strokeWidth: 1,
+      strokeDashArray: [5, 4],
+      opacity: 0.45,
+      selectable: false,
+      evented: false,
+    });
+    if (source.rotation) ghost.set({ angle: source.rotation });
+    markAsTransplantLine(ghost);
+    canvas.add(ghost);
+
+    const line = new Line([from.x, from.y, to.x, to.y], {
+      stroke: '#6366F1',
+      strokeWidth: 1.5,
+      strokeDashArray: [6, 4],
+      opacity: 0.7,
+      selectable: false,
+      evented: false,
+    });
+    markAsTransplantLine(line);
+    canvas.add(line);
+
+    // наконечник стрелки у нового места
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    const headLen = 9;
+    const head = new Triangle({
+      left: to.x,
+      top: to.y,
+      width: headLen,
+      height: headLen,
+      originX: 'center',
+      originY: 'center',
+      angle: (angle * 180) / Math.PI + 90,
+      fill: '#6366F1',
+      opacity: 0.9,
+      selectable: false,
+      evented: false,
+    });
+    markAsTransplantLine(head);
+    canvas.add(head);
+  }
+}
+
+// Синхронизация слоя объектов со store (wayback machine).
+// Вызывается при загрузке проекта, смене года/даты просмотра и изменении
+// набора объектов. На схеме остаются только объекты, «жившие» в выбранный
+// момент времени; чтобы не затирать уже созданные грядки-прямоугольники
+// точками-метками, синхронизируем поштучно только то, что изменилось.
+export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
+  const state = useGardenStore.getState();
+  const { currentYear } = state;
+  const visible = state.visibleObjects();
+  const entriesById = new Map(visible.map((o) => [o.id, o]));
+
+  // 1) Удаляем fabric-объекты, скрытые временем или удалённые из store
+  for (const obj of [...canvas.getObjects()]) {
+    const id = getGardenId(obj);
+    if (id && !entriesById.has(id)) canvas.remove(obj);
+  }
+
+  // 2) Добавляем/обновляем видимые объекты из store
+  for (const entry of visible) {
     let opacity = 1;
-    if (entry.year > currentYear) continue; // будущие годы не показываем
-    if (entry.year < currentYear) opacity = 0.35; // прошлые — полупрозрачные
+    const plantedYear = entry.plantedAt ? Number(entry.plantedAt.slice(0, 4)) : entry.year;
+    if (plantedYear < currentYear) opacity = 0.35; // прошлое — полупрозрачно («история»)
 
-    visibleIds.add(entry.id);
+    const existing = findObjectByGardenId(canvas, entry.id);
+    if (!existing) {
+      const rect = createFabricObjectFromEntry(entry);
+      rect.set({ opacity });
+      // объекты, восстановленные после перемотки времени, тоже не должны
+      // пересоздаваться при следующем reconcile (иначе потеряется размер)
+      markAsCreatedOnCanvas(rect);
+      canvas.add(rect);
+      continue;
+    }
 
-    const rect = createMarkerRect(entry);
-    rect.set({ opacity });
-    canvas.add(rect);
+    existing.set({ opacity });
+
+    // Позиция могла измениться (drag на canvas, пересадка) — подтягиваем из store.
+    if (Math.abs((existing.left ?? 0) - entry.x) > 0.5 || Math.abs((existing.top ?? 0) - entry.y) > 0.5) {
+      existing.set({ left: entry.x, top: entry.y });
+    }
+
+    // Размер: fabric-объекты никогда не пересоздаём — иначе сбрасывается
+    // размер, увеличенный пользователем рамкой трансформации (баг: «увеличил
+    // дерево → отмотал дату назад/вперёд → квадратик»). При расхождении
+    // размеров (например, загрузка .garden-файла) обновляем существующий
+    // объект инкрементально, сохраняя его идентичность и выделение.
+    const w = Math.max(existing.getScaledWidth(), 0);
+    const h = Math.max(existing.getScaledHeight(), 0);
+    if (Math.abs(w - entry.width) > 0.5 || Math.abs(h - entry.height) > 0.5) {
+      existing.set({
+        width: Math.max(entry.width / (existing.scaleX || 1), 1),
+        height: Math.max(entry.height / (existing.scaleY || 1), 1),
+      });
+    }
   }
 
   // Сохраняем выделение, если объект всё ещё виден
-  const selectedId = useGardenStore.getState().selectedObjectId;
-  if (selectedId && visibleIds.has(selectedId)) {
-    const obj = findObjectByGardenId(canvas, selectedId);
+  const selectedId = state.selectedObjectId;
+  const visibleSelected =
+    selectedId && visible.find((o) => o.id === selectedId && isVisibleInYear(o, currentYear));
+  if (visibleSelected) {
+    const obj = findObjectByGardenId(canvas, selectedId as string);
     if (obj) canvas.setActiveObject(obj);
   } else if (selectedId) {
     useGardenStore.getState().selectObject(null);
   }
+
+  // Пунктирные подсказки пересадки (стрелка + «призрак» прежнего места) —
+  // только для выбранного объекта; перерисовываются при каждом reconcile,
+  // поэтому стрелка следует за объектом во время drag'а.
+  drawTransplantHints(canvas);
 
   canvas.renderAll();
 }

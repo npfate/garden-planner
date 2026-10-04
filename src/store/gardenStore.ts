@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { Canvas as FabricCanvas } from 'fabric';
-import type { GardenObject } from '../types/garden';
+import type { ActivityEvent, GardenObject, IsoDate } from '../types/garden';
+import { formatDateRu, isoYear, todayIso } from '../utils/markers';
+import { isVisibleAt, isVisibleInYear, lifeBounds, makeEvent, momentOf } from '../utils/wayback';
 
 export type ToolId = 'select' | 'pan' | 'bed' | 'tree';
 
@@ -8,8 +10,11 @@ export interface GardenFileSnapshot {
   version: number;
   savedAt: string;
   objects: GardenObject[];
+  events: ActivityEvent[];
   backgroundImage: string | null;
   currentYear: number;
+  // Wayback: дата просмотра на момент сохранения (не обязательна в старых файлах)
+  viewDate?: IsoDate | null;
   scale: number;
   snapToGrid: boolean;
   activeTool: ToolId;
@@ -18,6 +23,10 @@ export interface GardenFileSnapshot {
 interface GardenState {
   objects: GardenObject[];
   currentYear: number;
+  // Wayback machine: дата просмотра схемы (внутри currentYear).
+  // null = «конец года» (годовой режим без точной даты).
+  viewDate: IsoDate | null;
+  events: ActivityEvent[];
   selectedObjectId: string | null;
   canvas: FabricCanvas | null;
 }
@@ -25,22 +34,50 @@ interface GardenState {
 interface GardenActions {
   addObject: (obj: GardenObject) => void;
   updateObject: (id: string, updates: Partial<GardenObject>) => void;
+  /** Выкопка (soft-delete): removedAt = дата, объект исчезает со схемы после неё,
+   *  но остаётся в истории wayback-машины. */
   removeObject: (id: string) => void;
+  /** «В корзину» — полное уничтожение объекта из всех годов и из истории. */
+  destroyObject: (id: string) => void;
+  relocateObject: (id: string, date: IsoDate) => void;
+  /** Пересадка одним действием: старая запись «выкапывается», новая садится
+   *  с сохранёнными свойствами (размер, тип, цикл, название). */
+  transplantObject: (id: string, date: IsoDate) => GardenObject | null;
+  addEvent: (event: ActivityEvent) => void;
   setObjects: (objects: GardenObject[]) => void;
   setYear: (year: number) => void;
+  setViewDate: (date: IsoDate | null) => void;
   selectObject: (id: string | null) => void;
   setCanvas: (canvas: FabricCanvas | null) => void;
+  visibleObjects: () => GardenObject[];
   saveToFile: () => string;
   loadFromFile: (json: string) => void;
 }
 
 export type GardenStore = GardenState & GardenActions;
 
-const CURRENT_YEAR_DEFAULT = 2024;
+// Год по умолчанию — текущий (не захардкожен).
+const CURRENT_YEAR_DEFAULT = Number(todayIso().slice(0, 4));
+
+// Единый момент «сейчас» для всей временнóй логики. Раньше годовой режим
+// (viewDate === null) трактовался как «конец года» (YYYY-12-31), а UI показывал
+// сегодняшнюю дату — из-за этого объекты при перемотке вели себя несогласованно.
+// Теперь: если точная дата просмотра не выбрана, смотрим на сад «сегодня».
+// Реализация — в utils/wayback.momentOf (переэкспортируем для совместности).
+export { momentOf } from '../utils/wayback';
+
+// Выкопан ли объект *до* указанной даты. Правило wayback: removedAt — дата
+// последнего дня жизни, поэтому сравнение строгое (<): в сам день выкопки
+// объект ещё виден на схеме. Синхронизировано с isVisibleAt в utils/wayback.
+function isDugBy(date: string, o: GardenObject): boolean {
+  return !!o.removedAt && o.removedAt < date;
+}
 
 export const useGardenStore = create<GardenStore>((set, get) => ({
   objects: [],
   currentYear: CURRENT_YEAR_DEFAULT,
+  viewDate: null,
+  events: [],
   selectedObjectId: null,
   canvas: null,
 
@@ -48,6 +85,9 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     set((state) => ({
       objects: [...state.objects, { ...obj, updatedAt: new Date().toISOString() }],
     }));
+    get().addEvent(
+      makeEvent('planted', obj, `Посадка: ${obj.name} (${formatDateRu(obj.plantedAt ?? todayIso())})`),
+    );
   },
 
   updateObject: (id: string, updates: Partial<GardenObject>): void => {
@@ -59,9 +99,103 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   },
 
   removeObject: (id: string): void => {
+    const obj = get().objects.find((o) => o.id === id);
+    if (!obj) return;
+    // Выкопка (soft-delete): removedAt = дата *последнего дня жизни* —
+    // объект исчезает со схемы начиная со следующего дня после этой даты,
+    // но остаётся в истории (можно отматать назад и увидеть, что он рос здесь).
+    // Дата берётся из текущего момента просмотра (wayback), а не системных
+    // часов: если смотрим на сад, например, на 4 августа и нажимаем «выкопать»,
+    // дерево должно пропасть с 5-го числа именно того года, который открыт.
+    // Если дата выкопки уже стоит и она раньше выбранной — не затираем:
+    // иначе «выкопанное в мае» внезапно ожило бы к августу.
+    const date = momentOf(get().viewDate);
+    set((state) => ({
+      objects: state.objects.map((o) =>
+        o.id === id && (!o.removedAt || o.removedAt > date) ? { ...o, removedAt: date } : o,
+      ),
+    }));
+    get().addEvent(makeEvent('removed', obj, `Выкопан: ${obj.name}, ${formatDateRu(date)} (остался в истории)`, date));
+  },
+
+  // «В корзину»: полное уничтожение объекта во всех временнóх срезах.
+  destroyObject: (id: string): void => {
+    const obj = get().objects.find((o) => o.id === id);
     set((state) => ({
       objects: state.objects.filter((o) => o.id !== id),
       selectedObjectId: state.selectedObjectId === id ? null : state.selectedObjectId,
+    }));
+    if (obj) {
+      get().addEvent(makeEvent('removed', obj, `Уничтожен (в корзину): ${obj.name}`));
+    }
+  },
+
+  // Пересадка: в указанный день объект «исчезает» со старого места.
+  // Пользователь тут же рисует новый объект (новая дата посадки) — на новом месте.
+  relocateObject: (id: string, date: IsoDate): void => {
+    const obj = get().objects.find((o) => o.id === id);
+    if (!obj) return;
+    set((state) => ({
+      objects: state.objects.map((o) => (o.id === id ? { ...o, removedAt: date } : o)),
+      selectedObjectId: null,
+    }));
+    get().addEvent(
+      makeEvent(
+        'moved',
+        obj,
+        `Пересадка: ${obj.name} выкопан ${formatDateRu(date)} — посадите его заново в новом месте`,
+        date,
+      ),
+    );
+  },
+
+  // Пересадка одним действием: старая запись «выкапывается» в date,
+  // новая сажается рядом с полным сохранением свойств (тип, название, размер,
+  // цикл, иконка) и датированной историей. Возвращает новую запись —
+  // вызывающий добавит её на canvas.
+  // Связь мест: old.transplantedToId ↔ new.transplantedFromId + transplantedAt
+  // (canvas рисует по ней пунктирную стрелку «откуда → куда»).
+  transplantObject: (id: string, date: IsoDate): GardenObject | null => {
+    const obj = get().objects.find((o) => o.id === id);
+    if (!obj) return null;
+    const now = new Date().toISOString();
+    const nextId = crypto.randomUUID();
+    const next: GardenObject = {
+      ...obj,
+      id: nextId,
+      x: obj.x + 30,
+      y: obj.y + 30,
+      year: isoYear(date) ?? obj.year,
+      plantedAt: date,
+      removedAt: null,
+      // история переносится к новому объекту (урожай/оценки не теряются)
+      history: { ...obj.history },
+      transplantedFromId: obj.id,
+      transplantedToId: null,
+      transplantedAt: date,
+      createdAt: now,
+      updatedAt: now,
+    };
+    set((state) => ({
+      objects: state.objects.map((o) =>
+        o.id === id ? { ...o, removedAt: date, transplantedToId: nextId, updatedAt: now } : o,
+      ),
+    }));
+    get().addObject(next);
+    get().addEvent(
+      makeEvent(
+        'moved',
+        obj,
+        `Пересадка: ${obj.name} → новое место, посажен ${formatDateRu(date)}`,
+        date,
+      ),
+    );
+    return next;
+  },
+
+  addEvent: (event: ActivityEvent): void => {
+    set((state) => ({
+      events: [...state.events, event].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
     }));
   },
 
@@ -69,8 +203,27 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     set({ objects });
   },
 
+  // Смена года сохраняет день и месяц выбранной даты просмотра
+  // (годовой режим больше не «рушит» дневной срез). Если дата не выбрана —
+  // просто переключаем год, «сейчас» остаётся сегодняшним числом.
   setYear: (year: number): void => {
-    set({ currentYear: year });
+    set((state) => {
+      if (!state.viewDate) return { currentYear: year };
+      const [, m, d] = state.viewDate.split('-');
+      // 29 февраля переносим на 28, если целевой год невисокосный
+      const lastDay = new Date(Date.UTC(year, Number(m), 0)).getUTCDate();
+      const safeDay = String(Math.min(Number(d), lastDay)).padStart(2, '0');
+      const next = `${year}-${m}-${safeDay}` as IsoDate;
+      return { currentYear: year, viewDate: next };
+    });
+  },
+
+  setViewDate: (date: IsoDate | null): void => {
+    const y = isoYear(date);
+    set((state) => ({
+      viewDate: date,
+      currentYear: date && y !== null ? y : state.currentYear,
+    }));
   },
 
   selectObject: (id: string | null): void => {
@@ -79,6 +232,34 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
 
   setCanvas: (canvas: FabricCanvas | null): void => {
     set({ canvas });
+  },
+
+  // Объекты, видимые «на этот момент времени» (год + опциональная дата).
+  // Правило пересадок: у объекта, который был пересажен (transplantedToId),
+  // «живёт» только последняя запись цепочки — промежуточные места сами по
+  // себе на схеме не показываются (их видно через стрелку-подсказку при
+  // клике на актуальный объект). Если же пересаженный объект позже выкопан
+  // («выкопать» без новой посадки), его старое место снова становится
+  // актуальным и рисуется.
+  visibleObjects: (): GardenObject[] => {
+    const { objects, currentYear, viewDate } = get();
+    const byId = new Map(objects.map((o) => [o.id, o]));
+    const now = momentOf(viewDate);
+    return objects.filter((o) => {
+      if (!isVisibleInYear(o, currentYear)) return false;
+      // Единая временна́я проверка (посажен/выкопан на эту дату).
+      if (o.plantedAt && lifeBounds(o).start > now) return false; // ещё не посажен
+      if (isDugBy(now, o)) return false; // выкопан ДО этой даты (removedAt < now)
+      if (o.transplantedToId) {
+        const next = byId.get(o.transplantedToId);
+        // Показываем только актуальное место цепочки пересадок. Проверка
+        // «живо ли следующее место» идёт через тот же isVisibleAt — раньше
+        // здесь было removedAt >= now, из-за чего в день выкопки следующего
+        // места скрывалось и прежнее (несогласованность с canvas-подпиской).
+        if (next && isVisibleAt(next, currentYear, viewDate)) return false;
+      }
+      return true;
+    });
   },
 
   // Собирает снапшот, подтягивая не-доменные поля из canvasStore.
@@ -90,8 +271,10 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       version: 1,
       savedAt: new Date().toISOString(),
       objects: state.objects,
+      events: state.events,
       backgroundImage: cs.backgroundImage,
       currentYear: state.currentYear,
+      viewDate: state.viewDate,
       scale: cs.scale,
       snapToGrid: cs.snapToGrid,
       activeTool: cs.activeTool,
@@ -107,9 +290,16 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       }
       const p = parsed as Partial<GardenFileSnapshot>;
       const objects: GardenObject[] = Array.isArray(p.objects) ? p.objects : [];
+      const events: ActivityEvent[] = Array.isArray(p.events) ? p.events : [];
       const currentYear: number =
         typeof p.currentYear === 'number' ? p.currentYear : CURRENT_YEAR_DEFAULT;
-      set({ objects, currentYear, selectedObjectId: null });
+      // Восстанавливаем дату просмотра из снапшота (если она валидная) —
+      // иначе после F5 wayback-состояние терялось и объекты «пропадали».
+      const viewDate: IsoDate | null =
+        typeof p.viewDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.viewDate)
+          ? (p.viewDate as IsoDate)
+          : null;
+      set({ objects, events, currentYear, viewDate, selectedObjectId: null });
 
       const cs = useCanvasStore.getState();
       if (typeof p.backgroundImage === 'string') cs.setBackgroundImage(p.backgroundImage);
