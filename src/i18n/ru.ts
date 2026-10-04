@@ -92,7 +92,7 @@ export const ru = {
   'properties.transplantedAt': 'Пересажен {date}',
   'properties.transplantedArrowHint': ' — на схеме показана стрелка от прежнего места',
   'properties.removedAt':
-    'Выкопан {date} — не виден на схеме после этой даты',
+    'Выкопан {date} — виден на схеме до этого дня включительно, со следующего дня исчезает (история сохраняется)',
   'properties.harvestTotal': 'Урожай за {year} год, кг — всего {total}',
   'properties.harvestAmount': 'Сколько собрали',
   'properties.harvestCollect': 'Собрать',

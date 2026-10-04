@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Canvas as FabricCanvas } from 'fabric';
 import type { ActivityEvent, GardenObject, IsoDate } from '../types/garden';
 import { formatDateRu, isoYear, todayIso } from '../utils/markers';
-import { isVisibleInYear, lifeBounds, makeEvent } from '../utils/wayback';
+import { isVisibleAt, isVisibleInYear, lifeBounds, makeEvent, momentOf } from '../utils/wayback';
 
 export type ToolId = 'select' | 'pan' | 'bed' | 'tree';
 
@@ -61,11 +61,12 @@ const CURRENT_YEAR_DEFAULT = Number(todayIso().slice(0, 4));
 // (viewDate === null) трактовался как «конец года» (YYYY-12-31), а UI показывал
 // сегодняшнюю дату — из-за этого объекты при перемотке вели себя несогласованно.
 // Теперь: если точная дата просмотра не выбрана, смотрим на сад «сегодня».
-export function momentOf(viewDate: IsoDate | null): string {
-  return viewDate ?? todayIso();
-}
+// Реализация — в utils/wayback.momentOf (переэкспортируем для совместности).
+export { momentOf } from '../utils/wayback';
 
-// Выкопан ли объект к указанной дате (removedAt строго раньше даты).
+// Выкопан ли объект *до* указанной даты. Правило wayback: removedAt — дата
+// последнего дня жизни, поэтому сравнение строгое (<): в сам день выкопки
+// объект ещё виден на схеме. Синхронизировано с isVisibleAt в utils/wayback.
 function isDugBy(date: string, o: GardenObject): boolean {
   return !!o.removedAt && o.removedAt < date;
 }
@@ -98,12 +99,16 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   removeObject: (id: string): void => {
     const obj = get().objects.find((o) => o.id === id);
     if (!obj) return;
-    // Выкопка (soft-delete): помечаем removedAt — объект исчезает со схемы
-    // после этой даты, но остаётся в истории (можно отматать год назад и
-    // увидеть, что он здесь рос). Если дата выкопки уже стоит — обновляем.
+    // Выкопка (soft-delete): removedAt = дата *последнего дня жизни* —
+    // объект исчезает со схемы начиная со следующего дня после этой даты,
+    // но остаётся в истории (можно отматать назад и увидеть, что он рос здесь).
+    // Если дата выкопки уже стоит и она раньше сегодняшней — не затираем:
+    // иначе «выкопанное в мае» внезапно ожило бы к августу.
     const date = todayIso();
     set((state) => ({
-      objects: state.objects.map((o) => (o.id === id ? { ...o, removedAt: date } : o)),
+      objects: state.objects.map((o) =>
+        o.id === id && (!o.removedAt || o.removedAt > date) ? { ...o, removedAt: date } : o,
+      ),
     }));
     get().addEvent(makeEvent('removed', obj, `Выкопан: ${obj.name}, ${formatDateRu(date)} (остался в истории)`, date));
   },
@@ -237,14 +242,17 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     const now = momentOf(viewDate);
     return objects.filter((o) => {
       if (!isVisibleInYear(o, currentYear)) return false;
+      // Единая временна́я проверка (посажен/выкопан на эту дату).
+      if (o.plantedAt && lifeBounds(o).start > now) return false; // ещё не посажен
+      if (isDugBy(now, o)) return false; // выкопан ДО этой даты (removedAt < now)
       if (o.transplantedToId) {
         const next = byId.get(o.transplantedToId);
-        const nextStillAlive = !!next && !isDugBy(now, next);
-        if (next && nextStillAlive) return false; // показываем только последнее место
+        // Показываем только актуальное место цепочки пересадок. Проверка
+        // «живо ли следующее место» идёт через тот же isVisibleAt — раньше
+        // здесь было removedAt >= now, из-за чего в день выкопки следующего
+        // места скрывалось и прежнее (несогласованность с canvas-подпиской).
+        if (next && isVisibleAt(next, currentYear, viewDate)) return false;
       }
-      // Единая временна́я проверка: дата просмотра или «сегодня».
-      if (o.plantedAt && lifeBounds(o).start > now) return false; // ещё не посажен
-      if (o.removedAt && o.removedAt <= now) return false; // уже выкопан
       return true;
     });
   },

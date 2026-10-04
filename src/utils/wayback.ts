@@ -47,21 +47,28 @@ export function isVisibleInYear(obj: GardenObject, year: number): boolean {
   return true;
 }
 
+// Момент «сейчас» для всей временнóй логики: если точная дата просмотра
+// не выбрана, смотрим на сад «сегодня», а не на конец года.
+export function momentOf(viewDate?: IsoDate | null): string {
+  return viewDate ?? todayIso();
+}
+
 // Виден ли объект «на этот момент времени» (год + опциональная точная дата).
-// viewDate === null — смотрим на сад «сегодня» (todayIso), а не на конец года:
-// раньше здесь подставлялось YYYY-12-31, из-за чего годовой режим расходился
-// с дневным (объекты «оживали» раньше/позже, чем должны). nowOf() в сторе
-// использует то же правило — логика единая.
+// Ключевое правило wayback: removedAt — это дата *последнего дня жизни*
+// (выкопка утром 5-го = дерево было живым на 4-е и исчезло к утру 5-го).
+// Поэтому сравнение строгое (<, а не <=): при просмотре даты, равной дате
+// выкопки, объект ещё виден. Раньше использовалось `removedAt <= now`,
+// из-за чего «выкопать 5-го» скрывало дерево и на 4-м числе (ошибка).
 export function isVisibleAt(obj: GardenObject, year: number, viewDate?: IsoDate | null): boolean {
   if (!isVisibleInYear(obj, year)) return false;
-  const now = viewDate ?? todayIso();
+  const now = momentOf(viewDate);
   // Если дата просмотра лежит в другом году относительно currentYear —
   // сверяемся строго по году (setViewDate синхронизирует их, но защитимся).
   const py = isoYear(now);
   if (py !== null && py !== year) return isVisibleInYear(obj, py);
   const { start } = lifeBounds(obj);
   if (obj.plantedAt && start > now) return false; // ещё не посажен на эту дату
-  if (obj.removedAt && obj.removedAt <= now) return false; // уже выкопан
+  if (obj.removedAt && obj.removedAt < now) return false; // выкопан ДО этой даты
   return true;
 }
 

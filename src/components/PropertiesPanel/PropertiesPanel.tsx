@@ -160,7 +160,8 @@ export default function PropertiesPanel() {
 
         {object.removedAt && (
           <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-            Выкопан {formatDateRu(object.removedAt)} — не виден на схеме после этой даты
+            Выкопан {formatDateRu(object.removedAt)} — виден на схеме до этого дня включительно,
+            со следующего дня исчезает (история сохраняется)
           </div>
         )}
 
