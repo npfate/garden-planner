@@ -7,13 +7,14 @@ const AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000; // каждые 5 минут (ТЗ �
 // Автосохранение проекта в localStorage + восстановление при запуске.
 export default function useAutosave(): void {
   const saveToFile = useGardenStore((s) => s.saveToFile);
-  const loadFromFile = useGardenStore((s) => s.loadFromFile);
 
   // Восстановление последнего автосейва при монтировании
   useEffect(() => {
     try {
       const saved = localStorage.getItem(AUTOSAVE_KEY);
-      if (saved) loadFromFile(saved);
+      // restoreSnapshot (не loadFromFile): legacy-автосейвы без поля events
+      // не должны затирать журнал, накопленный в текущей сессии.
+      if (saved) useGardenStore.getState().restoreSnapshot(saved);
     } catch {
       // повреждённый автосейв — игнорируем
     }

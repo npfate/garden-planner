@@ -33,6 +33,9 @@ interface GardenState {
 }
 
 interface GardenActions {
+  /** Восстановление снапшота (localStorage / .garden). Поддерживает legacy-формат
+   *  без поля events (журнал появился позже) — тогда события остаются как есть. */
+  restoreSnapshot: (json: string) => void;
   addObject: (obj: GardenObject) => void;
   updateObject: (id: string, updates: Partial<GardenObject>) => void;
   /** Выкопка (soft-delete): removedAt = дата, объект исчезает со схемы после неё,
@@ -116,7 +119,12 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
         o.id === id && (!o.removedAt || o.removedAt > date) ? { ...o, removedAt: date } : o,
       ),
     }));
-    get().addEvent(makeEvent('dug', obj, `Выкопан: ${obj.name}, ${formatDateRu(date)} (остался в истории)`, date));
+    // Событие пишем только если дата выкопки реально установлена/обновлена
+    // (повторное «выкопать» не должно плодить дубли в журнале).
+    const updated = get().objects.find((o) => o.id === id);
+    if (updated?.removedAt === date) {
+      get().addEvent(makeEvent('dug', obj, `Выкопан: ${obj.name}, ${formatDateRu(date)} (остался в истории)`, date));
+    }
   },
 
   // «В корзину»: полное уничтожение объекта во всех временнóх срезах.
@@ -283,6 +291,27 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     return JSON.stringify(snapshot, null, 2);
   },
 
+  // Восстановление автосейва: то же, что loadFromFile, но если в снапшоте
+  // отсутствует поле events (legacy-формат, сохранённый до появления журнала),
+  // текущий журнал НЕ затирается — иначе события «пропадали» после F5.
+  restoreSnapshot: (json: string): void => {
+    let hasEvents: boolean;
+    try {
+      const parsed: unknown = JSON.parse(json);
+      hasEvents = !!parsed && typeof parsed === 'object' && Array.isArray((parsed as Partial<GardenFileSnapshot>).events);
+    } catch {
+      return; // повреждённый снапшот — игнорируем
+    }
+    if (!hasEvents) {
+      // legacy-снапшот: подтягиваем объекты/год, события оставляем как есть
+      const prevEvents = get().events;
+      get().loadFromFile(json);
+      set({ events: prevEvents });
+      return;
+    }
+    get().loadFromFile(json);
+  },
+
   loadFromFile: (json: string): void => {
     try {
       const parsed: unknown = JSON.parse(json);
@@ -316,7 +345,6 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
           ? (p.viewDate as IsoDate)
           : null;
       set({ objects, events, currentYear, viewDate, selectedObjectId: null });
-
       const cs = useCanvasStore.getState();
       if (typeof p.backgroundImage === 'string') cs.setBackgroundImage(p.backgroundImage);
       else cs.setBackgroundImage(null);

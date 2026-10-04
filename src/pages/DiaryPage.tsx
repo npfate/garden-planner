@@ -107,7 +107,7 @@ export default function DiaryPage() {
             <option value="all">Все события</option>
             {ACTIVITY_ORDER.map((kind) => (
               <option key={kind} value={kind}>
-                {ACTIVITY_META[kind].label}
+                {ACTIVITY_META[kind]?.label ?? kind}
               </option>
             ))}
           </select>
@@ -115,7 +115,8 @@ export default function DiaryPage() {
             value={currentYear}
             onChange={(e) => setYear(Number(e.target.value))}
             className="rounded-md border border-border bg-white px-3 py-1.5 text-sm outline-none focus:border-primary"
-            aria-label="Год"
+            aria-label="Год тепловой карты"
+            title="Год для тепловой карты (лента событий показывает все годы)"
           >
             {years.map((y) => (
               <option key={y} value={y}>
@@ -131,7 +132,13 @@ export default function DiaryPage() {
       {groups.length === 0 && (
         <p className="text-text-secondary text-sm">
           Пока пусто. Добавляйте, перемещайте и убирайте объекты на схеме, собирайте урожай —
-          события появятся здесь.
+          события появятся здесь. Если вы сажали растения до появления журнала, посадите любое
+          растение заново — оно попадёт в ленту ниже.
+        </p>
+      )}
+      {groups.length > 0 && filtered.length !== events.length && (
+        <p className="text-xs text-text-secondary">
+          Показано событий: {filtered.length} из {events.length} (фильтр по типу; лента охватывает все годы).
         </p>
       )}
 
