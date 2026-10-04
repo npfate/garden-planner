@@ -49,11 +49,11 @@ function Heatmap({ events, year }: { events: ActivityEvent[]; year: number }) {
       <div className="flex gap-1 overflow-x-auto pb-1">
         {weeks.map((week, wi) => (
           <div key={wi} className="flex flex-col gap-1">
-            {week.map((cell) => {
+            {week.map((cell, di) => {
               const count = cell.date ? counts.get(cell.date) ?? 0 : 0;
               return (
                 <div
-                  key={cell.date ?? `out-${wi}`}
+                  key={`${wi}-${di}`}
                   title={cell.date ? `${formatDateRu(cell.date)}: ${count} событ.` : ''}
                   className={`w-3 h-3 rounded-sm flex-shrink-0 ${cell.date ? heatmapCellClass(count) : 'bg-transparent'}`}
                 />
