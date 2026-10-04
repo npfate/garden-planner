@@ -254,7 +254,8 @@ export default function GardenCanvas() {
       selectByObject(rect);
       canvas.renderAll();
 
-      useCanvasStore.getState().setActiveTool('select');
+      // Инструмент остаётся активным — можно ставить несколько грядок подряд.
+      // Выход: Escape или повторный клик по кнопке «Грядка» в тулбаре.
       bedDraftRef.current = null;
     };
 
@@ -280,7 +281,7 @@ export default function GardenCanvas() {
       canvas.setActiveObject(marker);
       selectByObject(marker);
       canvas.renderAll();
-      useCanvasStore.getState().setActiveTool('select');
+      // Инструмент остаётся активным — можно ставить несколько деревьев подряд.
     };
 
     const handleMouseDown = (event: TPointerEventInfo<TPointerEvent>): void => {
@@ -312,6 +313,19 @@ export default function GardenCanvas() {
           selectByObject(null);
         }
         return;
+      }
+
+      // Shift + перетаскивание при активном инструменте рисования — переместить объект,
+      // не выходя из режима добавления.
+      const rawDown = event.e as PointerEvent;
+      if (rawDown.button === 0 && rawDown.shiftKey) {
+        const shiftTarget = canvas.findTarget(event.e) as unknown as FabricObject | null;
+        if (shiftTarget && getGardenId(shiftTarget)) {
+          shiftTarget.selectable = true;
+          canvas.setActiveObject(shiftTarget);
+          canvas.requestRenderAll();
+          return;
+        }
       }
 
       if (tool === 'bed') {
@@ -392,11 +406,13 @@ export default function GardenCanvas() {
 
     const handleEscape = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return;
-      if (activeToolRef.current === 'bed' && bedDraftRef.current) {
+      // Сначала отменяем незавершённое превью грядки, затем выходим из режима рисования.
+      if (bedDraftRef.current) {
         if (bedDraftRef.current.preview) canvas.remove(bedDraftRef.current.preview);
         bedDraftRef.current = null;
         canvas.renderAll();
-      } else if (activeToolRef.current === 'tree') {
+      }
+      if (activeToolRef.current === 'bed' || activeToolRef.current === 'tree') {
         useCanvasStore.getState().setActiveTool('select');
       }
     };
