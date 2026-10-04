@@ -115,7 +115,7 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
         o.id === id && (!o.removedAt || o.removedAt > date) ? { ...o, removedAt: date } : o,
       ),
     }));
-    get().addEvent(makeEvent('removed', obj, `Выкопан: ${obj.name}, ${formatDateRu(date)} (остался в истории)`, date));
+    get().addEvent(makeEvent('dug', obj, `Выкопан: ${obj.name}, ${formatDateRu(date)} (остался в истории)`, date));
   },
 
   // «В корзину»: полное уничтожение объекта во всех временнóх срезах.
@@ -126,7 +126,7 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       selectedObjectId: state.selectedObjectId === id ? null : state.selectedObjectId,
     }));
     if (obj) {
-      get().addEvent(makeEvent('removed', obj, `Уничтожен (в корзину): ${obj.name}`));
+      get().addEvent(makeEvent('destroyed', obj, `Уничтожен (в корзину): ${obj.name}`));
     }
   },
 

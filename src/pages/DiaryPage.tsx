@@ -8,7 +8,8 @@ import { groupEventsByDay } from '../utils/wayback';
 // этот компонент менять не нужно.
 import { ACTIVITY_META, ACTIVITY_ORDER, heatmapCellClass } from '../config/activity';
 
-// Тепловая сетка «как на GitHub»: события по дням за выбранный год.
+// Тепловая сетка «как на GitHub»: столбцы — недели, строки — дни недели.
+// Пороги/цвета читаются из config/activity.ts (HEATMAP_LEVELS) — настраивается там же.
 function Heatmap({ events, year }: { events: ActivityEvent[]; year: number }) {
   const counts = useMemo(() => {
     const map = new Map<string, number>();
@@ -19,27 +20,53 @@ function Heatmap({ events, year }: { events: ActivityEvent[]; year: number }) {
     return map;
   }, [events, year]);
 
-  const days: string[] = [];
-  const d = new Date(year, 0, 1);
-  while (d.getFullYear() === year) {
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    days.push(`${year}-${m}-${day}`);
-    d.setDate(d.getDate() + 1);
-  }
+  const weeks = useMemo(() => {
+    // Первый столбец начинается с недели, содержащей 1 января.
+    const start = new Date(year, 0, 1);
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // понедельник недели 1 января
+    const result: { date: string | null }[][] = [];
+    const cursor = new Date(start);
+    while (cursor.getFullYear() <= year) {
+      const week: { date: string | null }[] = [];
+      for (let dow = 0; dow < 7; dow += 1) {
+        const inYear = cursor.getFullYear() === year;
+        const m = String(cursor.getMonth() + 1).padStart(2, '0');
+        const d = String(cursor.getDate()).padStart(2, '0');
+        week.push({ date: inYear ? `${year}-${m}-${d}` : null });
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      result.push(week);
+      if (cursor.getFullYear() > year) break;
+    }
+    return result;
+  }, [year]);
 
   return (
-    <div className="grid grid-flow-col gap-1 auto-cols-max overflow-x-auto p-2 panel rounded-lg border border-border">
-      {days.map((date) => {
-        const count = counts.get(date) ?? 0;
-        return (
-          <div
-            key={date}
-            title={`${formatDateRu(date)}: ${count} событ.`}
-            className={`w-3 h-3 rounded-sm flex-shrink-0 ${heatmapCellClass(count)}`}
-          />
-        );
-      })}
+    <div className="panel rounded-lg border border-border p-3 space-y-2">
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {weeks.map((week, wi) => (
+          <div key={wi} className="flex flex-col gap-1">
+            {week.map((cell) => {
+              const count = cell.date ? counts.get(cell.date) ?? 0 : 0;
+              return (
+                <div
+                  key={cell.date ?? `out-${wi}`}
+                  title={cell.date ? `${formatDateRu(cell.date)}: ${count} событ.` : ''}
+                  className={`w-3 h-3 rounded-sm flex-shrink-0 ${cell.date ? heatmapCellClass(count) : 'bg-transparent'}`}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      {/* Легенда уровней — генерируется из HEATMAP_LEVELS */}
+      <div className="flex items-center justify-end gap-1 text-xs text-text-secondary">
+        <span>Меньше</span>
+        {[0, 1, 4, 5].map((n) => (
+          <div key={n} className={`w-3 h-3 rounded-sm ${heatmapCellClass(n)}`} />
+        ))}
+        <span>Больше</span>
+      </div>
     </div>
   );
 }

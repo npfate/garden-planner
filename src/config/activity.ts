@@ -11,7 +11,18 @@
 // Компоненты (DiaryPage и др.) обязаны читать метаданные отсюда, чтобы
 // тепловая карта и лента событий оставались консистентными при расширении.
 
-import { Flower2, MapPinOff, MoveRight, Sprout, StickyNote } from 'lucide-react';
+import {
+  Flower2,
+  MapPinOff,
+  MessageSquare,
+  MoveRight,
+  Ruler,
+  Sprout,
+  StickyNote,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ActivityKind } from '../types/garden';
 
@@ -27,12 +38,32 @@ export const ACTIVITY_META: Record<ActivityKind, ActivityMeta> = {
   planted: { icon: Sprout, label: 'Посадка', className: 'bg-green-100 text-green-700' },
   moved: { icon: MoveRight, label: 'Перемещение', className: 'bg-blue-100 text-blue-700' },
   harvest: { icon: Flower2, label: 'Урожай', className: 'bg-amber-100 text-amber-700' },
-  removed: { icon: MapPinOff, label: 'Удаление', className: 'bg-red-100 text-red-700' },
+  dug: { icon: MapPinOff, label: 'Выкопка', className: 'bg-orange-100 text-orange-700' },
+  destroyed: { icon: Trash2, label: 'В корзину', className: 'bg-red-100 text-red-700' },
+  rating: { icon: ThumbsUp, label: 'Оценка', className: 'bg-violet-100 text-violet-700' },
+  resized: { icon: Ruler, label: 'Размер', className: 'bg-cyan-100 text-cyan-700' },
   note: { icon: StickyNote, label: 'Заметка', className: 'bg-gray-100 text-gray-700' },
 };
 
 /** Порядок обхода типов (легенда, фильтр «все типы», переключатели). */
-export const ACTIVITY_ORDER: ActivityKind[] = ['planted', 'moved', 'harvest', 'removed', 'note'];
+export const ACTIVITY_ORDER: ActivityKind[] = [
+  'planted',
+  'moved',
+  'harvest',
+  'dug',
+  'destroyed',
+  'rating',
+  'resized',
+  'note',
+];
+
+/** Иконка оценки по значению рейтинга (для событий kind='rating'). */
+export function ratingIcon(value: 'like' | 'dislike'): LucideIcon {
+  return value === 'like' ? ThumbsUp : ThumbsDown;
+}
+
+/** Запасная иконка для неизвестных типов событий (на случай расширения enum без обновления конфига). */
+export const FALLBACK_ICON: LucideIcon = MessageSquare;
 
 /**
  * Уровни насыщенности тепловой карты.

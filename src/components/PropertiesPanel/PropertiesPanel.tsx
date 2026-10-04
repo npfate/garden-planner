@@ -69,7 +69,17 @@ export default function PropertiesPanel() {
   };
 
   const toggleRating = (value: Exclude<VarietyRating, null>): void => {
-    setHistoryField({ rating: rating === value ? null : value });
+    const next = rating === value ? null : value;
+    setHistoryField({ rating: next });
+    if (next) {
+      addEvent(
+        makeEvent(
+          'rating',
+          object,
+          `Оценка сорта ${object.name}: ${next === 'like' ? '👍 нравится' : '👎 не нравится'} (${currentYear})`,
+        ),
+      );
+    }
   };
 
   // Сбор урожая: сумма копится в history[currentYear].harvest + событие в журнал.
@@ -237,6 +247,10 @@ export default function PropertiesPanel() {
             placeholder="Заметки по году…"
             value={yearEntry.notes ?? ''}
             onChange={(event) => setHistoryField({ notes: event.target.value })}
+            onBlur={() => {
+              const note = (yearEntry.notes ?? '').trim();
+              if (note) addEvent(makeEvent('note', object, `Заметка (${currentYear}): ${note}`));
+            }}
             rows={3}
             className={`${inputClass} resize-none`}
           />
