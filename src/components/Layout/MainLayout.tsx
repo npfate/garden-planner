@@ -29,10 +29,15 @@ export default function MainLayout() {
       <div className="flex-1 flex min-h-0">
         <Sidebar />
         <main className="flex-1 relative min-w-0 min-h-0 flex flex-col">
-          {/* Canvas монтируется один раз и не пересоздаётся при переходах между вкладками */}
-          <div className={isSchemaPage ? 'flex-1 min-h-0' : 'hidden'}>
+          {/* Canvas (схема) монтируется один раз и скрывается через hidden при переходах
+              между вкладками; все остальные страницы рендерятся без обёртки hidden */}
+          {isSchemaPage ? (
+            <div className="flex-1 min-h-0">
+              <Outlet />
+            </div>
+          ) : (
             <Outlet />
-          </div>
+          )}
           {isSchemaPage && <YearSwitcher />}
           {isSchemaPage && (
             <div className="absolute right-4 bottom-3 px-3 py-1 rounded-md bg-surface shadow-panel text-xs text-text-secondary select-none border border-border z-20">
