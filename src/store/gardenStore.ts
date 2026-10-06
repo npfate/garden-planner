@@ -260,7 +260,12 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     // Клик по пустому месту вне холста не порождает событие selection:cleared,
     // поэтому снимаем выделение с канваса вручную — иначе рамка выделения
     // останется на старом объекте, а Инвентарь подсветит другой.
-    state.canvas?.discardActiveObject();
+    // Но если цель уже выделена (повторный клик в Инвентаре), ничего не
+    // сбрасываем: иначе discardActiveObject() породил бы selection:cleared →
+    // selectObject(null) и «закрутился» бы цикл перерисовок (белый экран).
+    if (state.canvas && state.selectedObjectId !== id) {
+      state.canvas.discardActiveObject();
+    }
     set({ selectedObjectId: id });
     const canvas = state.canvas;
     if (!canvas) return;

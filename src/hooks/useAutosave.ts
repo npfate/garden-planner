@@ -19,7 +19,6 @@ export default function useAutosave(): void {
       // повреждённый автосейв — игнорируем
     }
     // выполняем один раз при старте приложения
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
