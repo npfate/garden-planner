@@ -325,15 +325,28 @@ export function syncFabricObjectToStore(obj: FabricObject): void {
   });
 }
 
+// Эффективный шаг сетки в пикселях сцены (0 — если snap выключен).
+export function getEffectiveGridStep(): number {
+  const { snapToGrid, gridStep } = useCanvasStore.getState();
+  if (!snapToGrid) return 0;
+  return Math.max(1, gridStep * PIXELS_PER_METER);
+}
+
+// Округление значения до ближайшего кратного шагу сетки.
+export function snapValue(value: number): number {
+  const step = getEffectiveGridStep();
+  if (!step) return value;
+  return Math.round(value / step) * step;
+}
+
 // Привязка точки к сетке (если включена) — метры переводим в пиксели сцены.
 export function getSnapPoint(x: number, y: number): { x: number; y: number } {
-  const { snapToGrid, gridStep } = useCanvasStore.getState();
-  if (!snapToGrid) return { x, y };
+  const step = getEffectiveGridStep();
+  if (!step) return { x, y };
 
-  const effectiveStep = Math.max(1, gridStep * PIXELS_PER_METER);
   return {
-    x: Math.round(x / effectiveStep) * effectiveStep,
-    y: Math.round(y / effectiveStep) * effectiveStep,
+    x: Math.round(x / step) * step,
+    y: Math.round(y / step) * step,
   };
 }
 

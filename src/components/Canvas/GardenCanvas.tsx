@@ -20,6 +20,7 @@ import {
   reconcileObjectsWithStore,
   getGardenId,
   getSnapPoint,
+  snapValue,
   isBackgroundObject,
   loadBackgroundImage,
   setBackgroundSelectable,
@@ -227,6 +228,30 @@ export default function GardenCanvas() {
       const activeObj = canvas.getActiveObject();
       if (!activeObj) return;
       const id = getGardenId(activeObj);
+      // Snap to grid (если включён): финальная привязка позиции, размеров и угла.
+      // Существующие объекты НЕ перестраиваются — только результат текущего действия.
+      const step = useCanvasStore.getState().snapToGrid ? Math.max(1, useCanvasStore.getState().gridStep * PIXELS_PER_METER) : 0;
+      if (step > 0 && !isBackgroundObject(activeObj) && !isTransplantLine(activeObj)) {
+        const w = activeObj.width ?? 0;
+        const h = activeObj.height ?? 0;
+        const sw = activeObj.getScaledWidth();
+        const sh = activeObj.getScaledHeight();
+        const snappedW = Math.max(step, snapValue(sw));
+        const snappedH = Math.max(step, snapValue(sh));
+        activeObj.set({
+          left: snapValue(activeObj.left ?? 0),
+          top: snapValue(activeObj.top ?? 0),
+          angle: snapValue(activeObj.angle ?? 0),
+        });
+        if (snappedW !== sw || snappedH !== sh) {
+          activeObj.set({
+            scaleX: snappedW / (w || 1),
+            scaleY: snappedH / (h || 1),
+          });
+        }
+        activeObj.setCoords();
+        canvas.requestRenderAll();
+      }
       const before = id ? useGardenStore.getState().objects.find((o) => o.id === id) : undefined;
       syncFabricObjectToStore(activeObj);
       if (!before) return;
@@ -546,6 +571,15 @@ export default function GardenCanvas() {
     canvas.on('selection:created', onSelectionChanged);
     canvas.on('selection:updated', onSelectionChanged);
     canvas.on('selection:cleared', () => selectByObject(null));
+    // Snap to grid при перемещении: «прилипаем» к сетке в реальном времени.
+    const onObjectMoving = (e: { target?: FabricObject | null }): void => {
+      const obj = e.target;
+      if (!obj) return;
+      if (!useCanvasStore.getState().snapToGrid) return;
+      if (isBackgroundObject(obj) || isTransplantLine(obj)) return;
+      obj.set({ left: snapValue(obj.left ?? 0), top: snapValue(obj.top ?? 0) });
+    };
+    canvas.on('object:moving', onObjectMoving);
     canvas.on('object:modified', onObjectModified);
 
     window.addEventListener('keydown', handleEscape);
@@ -569,6 +603,7 @@ export default function GardenCanvas() {
       canvas.off('selection:created', onSelectionChanged);
       canvas.off('selection:updated', onSelectionChanged);
       canvas.off('selection:cleared');
+      canvas.off('object:moving', onObjectMoving);
       canvas.off('object:modified', onObjectModified);
       window.removeEventListener('keydown', handleEscape);
       window.removeEventListener('keydown', onKeyDownDelete);
