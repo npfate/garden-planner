@@ -273,8 +273,10 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     // обращаться нельзя.
     const cx = entry.x + entry.width / 2;
     const cy = entry.y + entry.height / 2;
-    const fabricObj = findFabricObjectByGardenId(canvas, id);
-    if (fabricObj) canvas.setActiveObject(fabricObj);
+    // Порядок критичен: сначала двигаем камеру, и только потом выделяем объект.
+    // Иначе control-точки рамки выделения вычисляются в старых координатах
+    // вьюпорта и рамка «появляется не в том месте», а при первом клике по
+    // ручке пересчитывается и «перепрыгивает» на объект.
     const zoom = canvas.getZoom() || 1;
     const vpt = canvas.viewportTransform;
     if (!vpt) return;
@@ -282,6 +284,14 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
     vpt[3] = zoom;
     vpt[4] = (canvas.getWidth() ?? 0) / 2 - cx * zoom;
     vpt[5] = (canvas.getHeight() ?? 0) / 2 - cy * zoom;
+    // setViewportTransform пересчитывает геометрию контрол-точек всех объектов
+    // под новый вьюпорт (прямое присваивание vpt этого не делает).
+    canvas.setViewportTransform(vpt);
+
+    // Выделение ставим ПОСЛЕ камеры — тогда oCorners/рамка рисуются уже в
+    // правильных экранных координатах.
+    const fabricObj = findFabricObjectByGardenId(canvas, id);
+    if (fabricObj) canvas.setActiveObject(fabricObj);
     canvas.requestRenderAll();
   },
 
