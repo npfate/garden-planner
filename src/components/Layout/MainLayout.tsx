@@ -1,6 +1,5 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import Toolbar from '../Toolbar/Toolbar';
-import Sidebar from '../Sidebar/Sidebar';
 import NavRail from '../Sidebar/NavRail';
 import SchemaSidePanel from '../Sidebar/SchemaSidePanel';
 import PropertiesPanel from '../PropertiesPanel/PropertiesPanel';
@@ -30,11 +29,11 @@ export default function MainLayout() {
       )}
       <div className="flex-1 flex min-h-0">
         {/* Вариант A: узкая навигационная полоса NavRail присутствует на всех
-            страницах, чтобы навигация не «пропадала» при переключении вкладок.
-            На «Схеме» рядом с ней показывается панель Библиотека/Инвентарь,
-            на остальных страницах — широкий Sidebar как раньше. */}
+            страницах. На «Схеме» рядом с ней показывается панель Библиотека/Инвентарь;
+            на остальных страницах широкий Sidebar убран, чтобы не дублировать
+            навигацию — страница занимает всё пространство (заголовок в шапке). */}
         <NavRail />
-        {isSchemaPage ? <SchemaSidePanel /> : <Sidebar />}
+        {isSchemaPage && <SchemaSidePanel />}
         <main className="flex-1 relative min-w-0 min-h-0 flex flex-col">
           {/* Canvas (схема) монтируется один раз и скрывается через hidden при переходах
               между вкладками; все остальные страницы рендерятся без обёртки hidden */}
