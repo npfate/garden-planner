@@ -6,6 +6,15 @@ import { useGardenStore } from '../../store/gardenStore';
 import { LIBRARY_ITEMS_FLAT } from '../../constants/objectLibrary';
 import type { GardenObject } from '../../types/garden';
 
+// Инвентарь и canvas используют ОДНУ временну́ю модель: store.visibleObjects()
+// (см. utils/wayback.ts). Раньше здесь была упрощённая копия фильтра, которая
+// расходилась с канвасом в двух местах:
+//  - момент «сейчас»: канвас смотрит на СЕГОДНЯШНЮЮ дату (momentOf), а список
+//    — на конец выбранного года → объекты, посаженные/выкопанные в текущем
+//    году, были в списке, но отсутствовали на схеме (и наоборот);
+//  - правило пересадок: канвас скрывает промежуточные звенья цепочки только
+//    если следующее место ещё живо; старая копия скрывала их всегда.
+
 // Инвентарь — список ЭКЗЕМПЛЯРОВ, уже размещённых на схеме.
 // Аналог «дерева объектов» в CAD / «слоёв» в Photoshop:
 // клик по строке выделяет объект и перемещает камеру к нему (focusOnObject).
@@ -47,27 +56,16 @@ interface Group {
 }
 
 export default function Inventory() {
-  const objects = useGardenStore((s) => s.objects);
+  // Единый источник истины для фильтра по времени — тот же селектор,
+  // которым канвас решает, что рисовать (реактивно подписывается на
+  // objects / currentYear / viewDate внутри стора).
+  const visibleObjects = useGardenStore((s) => s.visibleObjects());
   const viewDate = useGardenStore((s) => s.viewDate);
   const currentYear = useGardenStore((s) => s.currentYear);
   const selectedObjectId = useGardenStore((s) => s.selectedObjectId);
   const focusOnObject = useGardenStore((s) => s.focusOnObject);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-
-  // Индикатор года: показываем только объекты, существующие на текущий
-  // момент времени wayback-машины (год + дата просмотра).
-  const visibleObjects = useMemo(() => {
-    const moment = viewDate ?? `${currentYear}-12-31`;
-    return objects.filter((o) => {
-      const planted = o.plantedAt ?? `${o.year}-01-01`;
-      if (planted > moment) return false;
-      if (o.removedAt && o.removedAt < moment) return false;
-      // Промежуточные звенья цепочки пересадок не показываем — видна актуальная запись.
-      if (o.transplantedToId) return false;
-      return true;
-    });
-  }, [objects, viewDate, currentYear]);
 
   const groups = useMemo<Group[]>(() => {
     const q = query.trim().toLowerCase();
