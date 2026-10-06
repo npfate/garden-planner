@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import Toolbar from '../Toolbar/Toolbar';
 import Sidebar from '../Sidebar/Sidebar';
+import NavRail from '../Sidebar/NavRail';
 import SchemaSidePanel from '../Sidebar/SchemaSidePanel';
 import PropertiesPanel from '../PropertiesPanel/PropertiesPanel';
 import YearSwitcher from '../YearSwitcher/YearSwitcher';
@@ -28,7 +29,15 @@ export default function MainLayout() {
         </header>
       )}
       <div className="flex-1 flex min-h-0">
-        {isSchemaPage ? <SchemaSidePanel /> : <Sidebar />}
+        {/* Вариант A: на странице «Схема» — узкая навигационная полоса + панель Библиотека/Инвентарь */}
+        {isSchemaPage ? (
+          <>
+            <NavRail />
+            <SchemaSidePanel />
+          </>
+        ) : (
+          <Sidebar />
+        )}
         <main className="flex-1 relative min-w-0 min-h-0 flex flex-col">
           {/* Canvas (схема) монтируется один раз и скрывается через hidden при переходах
               между вкладками; все остальные страницы рендерятся без обёртки hidden */}
