@@ -402,14 +402,30 @@ export default function GardenCanvas() {
 
       // Инструменты размещения: клик по существующему объекту или его
       // контролам НЕ должен создавать новый объект — перемещение/ресайз
-      // обрабатывает сам Fabric.js (нативное поведение). Размещение внутри
-      // грядки/парника разрешено всегда, но только для растений (см. ниже).
-      const downTarget = event.target as FabricObject | null | undefined;
+      // обрабатывает сам Fabric.js (нативное поведение).
+      // ВАЖНО: event.target в Fabric v6 может быть не самим объектом, а его
+      // дочерним элементом (например, Text внутри Group) или ActiveSelection.
+      // Поэтому идём вверх по иерархии через parent, пока не найдём корневой
+      // интерактивный объект с gardenId.
+      const findRootInteractive = (t: unknown): FabricObject | null => {
+        let cur = t as FabricObject | null;
+        while (cur) {
+          if (getGardenId(cur)) return cur;
+          const p = (cur as unknown as { parent?: FabricObject }).parent;
+          if (!p || p.type === 'canvas') break;
+          cur = p;
+        }
+        return null;
+      };
+
+      const downTarget = findRootInteractive(event.target);
       let placementParentId: string | null = null;
-      if (downTarget && getGardenId(downTarget)) {
+      if (downTarget) {
         const targetType = getObjectType(downTarget);
         const isContainer = targetType === 'bed' || targetType === 'greenhouse';
         const plantTool = tool === 'bed' ? false : isPlantTool(tool);
+        // Размещение растения ВНУТРИ контейнера разрешено всегда (по согласованной логике),
+        // остальные клики по объектам игнорируем — пусть Fabric двигает/ресайзит.
         if (!(isContainer && plantTool)) return;
         placementParentId = getGardenId(downTarget);
       }

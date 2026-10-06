@@ -47,7 +47,10 @@ const structureDefaults = { width: 3, height: 2 };
 const treeDefaults = { crownDiameter: 3 };
 const bushDefaults = { crownDiameter: 0.8 };
 const flowerDefaults = { crownDiameter: 0.3 };
-const seedlingDefaults = { count: 1 };
+// lifecycle: 'annual' — однолетники (овощные культуры сезона). Без этого поля
+// саженец трактовался как многолетник по умолчанию и «исчезал» при перемотке
+// даты (см. isVisibleInYear/isVisibleAt в utils/wayback).
+const seedlingDefaults = { count: 1, lifecycle: 'annual' };
 
 export const OBJECT_LIBRARY: LibraryCategory[] = [
   {
