@@ -26,6 +26,7 @@ import {
   setBackgroundSelectable,
   syncFabricObjectToStore,
   refreshVarietyLabel,
+  isVarietyLabel,
 } from './fabricSync';
 
 // Эмодзи-маркеры плодовых/декоративных деревьев (для типов 'tree').
@@ -576,6 +577,15 @@ export default function GardenCanvas() {
     const onObjectMoving = (e: { target?: FabricObject | null }): void => {
       const obj = e.target;
       if (!obj) return;
+      // Подпись сортов следует за деревом во время drag'а (и snap, и free).
+      const extras = (obj.get('extra') as FabricObject[] | undefined) ?? [];
+      for (const l of extras) {
+        if (!isVarietyLabel(l)) continue;
+        l.set({
+          left: (obj.left ?? 0) + Math.max(obj.getScaledWidth(), 1) / 2,
+          top: (obj.top ?? 0) + Math.max(obj.getScaledHeight(), 1) + 4,
+        });
+      }
       if (!useCanvasStore.getState().snapToGrid) return;
       if (isBackgroundObject(obj) || isTransplantLine(obj)) return;
       obj.set({ left: snapValue(obj.left ?? 0), top: snapValue(obj.top ?? 0) });
