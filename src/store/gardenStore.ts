@@ -4,6 +4,7 @@ import type { ActivityEvent, GardenObject, IsoDate } from '../types/garden';
 import { formatDateRu, isoYear, todayIso } from '../utils/markers';
 import { isVisibleAt, isVisibleInYear, lifeBounds, makeEvent, momentOf } from '../utils/wayback';
 import { ACTIVITY_META } from '../config/activity';
+import { getLibraryItem } from '../constants/objectLibrary';
 
 // Поиск fabric-объекта по garden-id. Локальный хелпер (в components/Canvas/fabricSync
 // такая же функция есть, но импорт оттуда создал бы цикл store -> components).
@@ -375,7 +376,31 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
         throw new Error('Invalid file format');
       }
       const p = parsed as Partial<GardenFileSnapshot>;
-      const objects: GardenObject[] = Array.isArray(p.objects) ? p.objects : [];
+      const rawObjects: GardenObject[] = Array.isArray(p.objects) ? p.objects : [];
+      // Миграция объектов из старых .garden-файлов (до Спринта 5): поля
+      // libraryItemId / crownDiameter отсутствовали. Подтягиваем дефолты из
+      // Библиотеки объектов по типу, чтобы Инвентарь и Панель свойств
+      // корректно группировали и отображали legacy-экземпляры.
+      const TYPE_TO_LIBRARY_ITEM: Partial<Record<GardenObject['type'], string>> = {
+        bed: 'bed',
+        greenhouse: 'greenhouse',
+        building: 'house',
+      };
+      const objects: GardenObject[] = rawObjects.map((o) => {
+        if (!o.libraryItemId) {
+          const fallbackId = TYPE_TO_LIBRARY_ITEM[o.type];
+          const tpl = fallbackId ? getLibraryItem(fallbackId) : undefined;
+          return {
+            ...o,
+            libraryItemId: fallbackId ?? null,
+            crownDiameter: o.crownDiameter ?? (tpl?.defaultProperties['crownDiameter'] as number | undefined),
+          };
+        }
+        return {
+          ...o,
+          crownDiameter: o.crownDiameter ?? (getLibraryItem(o.libraryItemId)?.defaultProperties['crownDiameter'] as number | undefined),
+        };
+      });
       // Миграция legacy-снапшотов (старый localStorage / .garden): события могли
       // содержать kind из ранней схемы ('created', 'deleted') или без kind вовсе.
       // Маппим в актуальную ActivityKind, иначе UI падает на неизвестном ключе.

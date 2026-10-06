@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Move, Shovel, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react';
 import { useGardenStore } from '../../store/gardenStore';
+import { getLibraryItem, getCategoryName } from '../../constants/objectLibrary';
 import type { PlantLifecycle, VarietyRating } from '../../types/garden';
 import { formatDateRu, todayIso } from '../../utils/markers';
 import { makeEvent } from '../../utils/wayback';
@@ -123,6 +124,48 @@ export default function PropertiesPanel() {
         <FieldRow label="Тип" readOnly>
           <input type="text" value={object.type} readOnly className={readonlyClass} />
         </FieldRow>
+
+        {/* Источник из Библиотеки объектов: показываем шаблон, по которому
+            создан экземпляр, и даём возможность отвязать связь. */}
+        {(() => {
+          const tpl = object.libraryItemId ? getLibraryItem(object.libraryItemId) : undefined;
+          if (!tpl) return null;
+          return (
+            <FieldRow label="Шаблон (Библиотека)">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={`${tpl.name} · ${getCategoryName(tpl.category)}`}
+                  readOnly
+                  className={readonlyClass}
+                />
+                <button
+                  type="button"
+                  onClick={() => updateObject(object.id, { libraryItemId: null })}
+                  className="text-xs text-text-secondary hover:text-text-primary underline underline-offset-2 flex-shrink-0"
+                  title="Отвязать объект от шаблона Библиотеки"
+                >
+                  Отвязать
+                </button>
+              </div>
+            </FieldRow>
+          );
+        })()}
+
+        {typeof object.crownDiameter === 'number' && (
+          <FieldRow label="Диаметр кроны / габарита, м">
+            <input
+              type="number"
+              min={0}
+              step={0.1}
+              value={object.crownDiameter}
+              onChange={(event) =>
+                updateObject(object.id, { crownDiameter: Number(event.target.value) })
+              }
+              className={inputClass}
+            />
+          </FieldRow>
+        )}
 
         <FieldRow label="Год посадки">
           <input
