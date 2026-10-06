@@ -4,6 +4,7 @@ import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
 import type { GardenObject } from '../../types/garden';
 import { getMarkerColor } from '../../utils/markers';
 import { isVisibleInYear } from '../../utils/wayback';
+import { getLibraryItem } from '../../constants/objectLibrary';
 
 export const GRID_COLOR = '#E5E7EB';
 export const PIXELS_PER_METER = 50;
@@ -84,7 +85,9 @@ export function markAsCreatedOnCanvas(obj: FabricObject): void {
 // Создание fabric-объекта для записи store.
 // Размеры всегда берутся из записи (пользователь может увеличить объект
 // рамкой трансформации — значения сохраняются в store при object:modified).
-export function createFabricObjectFromEntry(entry: GardenObject): Rect {
+// Возвращаемый тип — FabricObject: растения (шаг 6.4) оборачиваются в Group
+// с эмодзи-иконкой и подписью, грядки/постройки остаются Rect.
+export function createFabricObjectFromEntry(entry: GardenObject): FabricObject {
   const isBed = entry.type === 'bed';
   // Для ВСЕХ типов берём сохранённые пользователем размеры из store
   // (раньше немаркированные объекты строились фиксированным MARKER_SIZE —
@@ -123,7 +126,89 @@ export function createFabricObjectFromEntry(entry: GardenObject): Rect {
   setObjectType(rect, entry.type);
   applyObjectDefaults(rect);
   attachVarietyLabel(rect, entry);
+
+  // Спринт 6, шаг 6.4: растения (деревья/кусты/цветы/саженцы) рисуем не
+  // «квадратиками», а Group с эмодзи-иконкой и подписью имени. Грядки,
+  // парники и постройки остаются прямоугольниками.
+  const isPlant = entry.type === 'tree' || entry.type === 'seedling';
+  const iconChar = resolveIconChar(entry);
+  if (isPlant && iconChar) {
+    return wrapMarkerWithIcon(rect, entry, iconChar);
+  }
   return rect;
+}
+
+// --- Иконки растений на canvas (Спринт 6, шаг 6.4) ---
+
+const ICON_KEY = '__gardenIcon';
+
+export function isIconText(obj: FabricObject): boolean {
+  return (obj as unknown as Record<string, unknown>)[ICON_KEY] === true;
+}
+
+function markAsIcon(obj: FabricObject): void {
+  (obj as unknown as Record<string, unknown>)[ICON_KEY] = true;
+}
+
+// Какой символ рисовать в центре маркера: пользовательская иконка (customIcon),
+// иначе эмодзи шаблона из Библиотеки (по libraryItemId).
+export function resolveIconChar(entry: GardenObject): string | null {
+  const custom = entry.customIcon?.trim();
+  if (custom) return custom;
+  if (!entry.libraryItemId) return null;
+  return getLibraryItem(entry.libraryItemId)?.emoji ?? null;
+}
+
+// Размер шрифта эмодзи под габарит маркера (с запасом на рамку).
+function iconFontSize(w: number, h: number): number {
+  return Math.max(12, Math.min(Math.max(w, h) * 0.75, 64));
+}
+
+// Обёртка маркера-Rect в Group: фон + эмодзи + подпись имени.
+// Группа двигается/ресайзится как единое целое; syncFabricObjectToStore
+// читает геометрию с группы, поэтому store остаётся источником истины.
+function wrapMarkerWithIcon(rect: Rect, entry: GardenObject, char: string): Group {
+  const w = Math.max(rect.width ?? 1, 1);
+  const h = Math.max(rect.height ?? 1, 1);
+
+  const icon = new Text(char, {
+    left: w / 2,
+    top: h / 2,
+    originX: 'center',
+    originY: 'center',
+    fontSize: iconFontSize(w, h),
+    fontFamily: 'serif',
+    selectable: false,
+    evented: false,
+  });
+  markAsIcon(icon);
+
+  const label = new Text(entry.name, {
+    left: w / 2,
+    top: h + 3,
+    originX: 'center',
+    originY: 'top',
+    fontSize: 11,
+    fontFamily: 'Inter, sans-serif',
+    fill: '#374151',
+    textAlign: 'center',
+    selectable: false,
+    evented: false,
+  });
+  markAsIcon(label);
+
+  const group = new Group([rect, icon, label], {
+    interactive: true, // hit-тест по дочерним объектам — клик работает как раньше
+    subTargetCheck: false,
+    originX: 'left',
+    originY: 'top',
+  });
+  // Геометрия группы совпадает с левым верхним углом маркера (origin left/top)
+  group.set({ left: entry.x, top: entry.y });
+  setGardenId(group, entry.id);
+  setObjectType(group, entry.type);
+  applyObjectDefaults(group);
+  return group;
 }
 
 // --- Подпись сортов под объектом (для деревьев с прививками) ---

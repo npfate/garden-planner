@@ -28,6 +28,8 @@ export interface LibraryItem {
   category: LibraryCategoryId; // категория верхнего уровня для группировки
   subcategory?: string; // id дочерней категории ("trees" | "fruit_trees" | "bushes")
   icon: string; // имя иконки из lucide-react
+  // Эмодзи-иконка для отрисовки на canvas (Спринт 6, шаг 6.4).
+  emoji?: string;
   objectType: GardenObjectType; // тип объекта в сторе/на канвасе
   defaultProperties: Partial<Record<string, unknown>>;
   meta?: LibraryTemplateMeta;
@@ -80,11 +82,11 @@ export const OBJECT_LIBRARY: LibraryCategory[] = [
         name: 'Деревья',
         icon: 'TreePine',
         items: [
-          { id: 'birch', name: 'Берёза', category: 'tree', subcategory: 'trees', icon: 'TreeDeciduous', objectType: 'tree', defaultProperties: { ...treeDefaults }, meta: {"heightM": 25, "spacingM": 4, "frostResistance": "высокая", "description": "Быстрорастущая светолюбивая порода; корни поверхностные — не сажать близко к постройкам."} },
-          { id: 'pine', name: 'Сосна', category: 'tree', subcategory: 'trees', icon: 'TreePine', objectType: 'tree', defaultProperties: { ...treeDefaults }, meta: {"heightM": 30, "spacingM": 4, "frostResistance": "высокая", "description": "Морозостойка, нетребовательна к почвам; хорошо растёт на песчаных грунтах."} },
-          { id: 'spruce', name: 'Ель', category: 'tree', subcategory: 'trees', icon: 'TreePine', objectType: 'tree', defaultProperties: { ...treeDefaults }, meta: {"heightM": 30, "spacingM": 3, "frostResistance": "высокая", "description": "Теневынослива, но требовательна к влажности воздуха и почвы."} },
-          { id: 'hazel', name: 'Орешник', category: 'tree', subcategory: 'trees', icon: 'TreeDeciduous', objectType: 'tree', defaultProperties: { crownDiameter: 2.5 }, meta: {"heightM": 4, "spacingM": 3, "frostResistance": "средняя", "ripening": "сентябрь", "description": "Орешник; требует перекрёстного опыления — сажать минимум 2–3 растения."} },
-          { id: 'oak', name: 'Дуб', category: 'tree', subcategory: 'trees', icon: 'TreeDeciduous', objectType: 'tree', defaultProperties: { crownDiameter: 4 }, meta: {"heightM": 30, "spacingM": 5, "frostResistance": "средняя", "description": "Мощная корневая система; закладывать не ближе 5 м к фундаменту."} },
+          { id: 'birch', name: 'Берёза', category: 'tree', subcategory: 'trees', icon: 'TreeDeciduous', emoji: '🌳', objectType: 'tree', defaultProperties: { ...treeDefaults }, meta: {"heightM": 25, "spacingM": 4, "frostResistance": "высокая", "description": "Быстрорастущая светолюбивая порода; корни поверхностные — не сажать близко к постройкам."} },
+          { id: 'pine', name: 'Сосна', category: 'tree', subcategory: 'trees', icon: 'TreePine', emoji: '🌲', objectType: 'tree', defaultProperties: { ...treeDefaults }, meta: {"heightM": 30, "spacingM": 4, "frostResistance": "высокая", "description": "Морозостойка, нетребовательна к почвам; хорошо растёт на песчаных грунтах."} },
+          { id: 'spruce', name: 'Ель', category: 'tree', subcategory: 'trees', icon: 'TreePine', emoji: '🌲', objectType: 'tree', defaultProperties: { ...treeDefaults }, meta: {"heightM": 30, "spacingM": 3, "frostResistance": "высокая", "description": "Теневынослива, но требовательна к влажности воздуха и почвы."} },
+          { id: 'hazel', name: 'Орешник', category: 'tree', subcategory: 'trees', icon: 'TreeDeciduous', emoji: '🌰', objectType: 'tree', defaultProperties: { crownDiameter: 2.5 }, meta: {"heightM": 4, "spacingM": 3, "frostResistance": "средняя", "ripening": "сентябрь", "description": "Орешник; требует перекрёстного опыления — сажать минимум 2–3 растения."} },
+          { id: 'oak', name: 'Дуб', category: 'tree', subcategory: 'trees', icon: 'TreeDeciduous', emoji: '🌳', objectType: 'tree', defaultProperties: { crownDiameter: 4 }, meta: {"heightM": 30, "spacingM": 5, "frostResistance": "средняя", "description": "Мощная корневая система; закладывать не ближе 5 м к фундаменту."} },
         ],
       },
       {
@@ -92,11 +94,11 @@ export const OBJECT_LIBRARY: LibraryCategory[] = [
         name: 'Плодовые',
         icon: 'Apple',
         items: [
-          { id: 'apple', name: 'Яблоня', category: 'fruit_tree', subcategory: 'fruit_trees', icon: 'Apple', objectType: 'tree', defaultProperties: { crownDiameter: 3, varieties: [] }, meta: {"heightM": 5, "spacingM": 3, "frostResistance": "высокая", "ripening": "август–октябрь", "description": "Светолюбива; подвой определяет итоговую высоту и схему посадки."} },
-          { id: 'pear', name: 'Груша', category: 'fruit_tree', subcategory: 'fruit_trees', icon: 'Apple', objectType: 'tree', defaultProperties: { crownDiameter: 3, varieties: [] }, meta: {"heightM": 5, "spacingM": 3, "frostResistance": "средняя", "ripening": "сентябрь–октябрь", "description": "Теплолюбивее яблони; лучшие южные склоны, защита от ветра."} },
-          { id: 'plum', name: 'Слива', category: 'fruit_tree', subcategory: 'fruit_trees', icon: 'Apple', objectType: 'tree', defaultProperties: { crownDiameter: 2.5, varieties: [] }, meta: {"heightM": 3, "spacingM": 2.5, "frostResistance": "средняя", "ripening": "июль–сентябрь", "description": "Требует опылителей; быстро даёт поросль, которую нужно удалять."} },
-          { id: 'cherry', name: 'Вишня', category: 'fruit_tree', subcategory: 'fruit_trees', icon: 'Apple', objectType: 'tree', defaultProperties: { crownDiameter: 2, varieties: [] }, meta: {"heightM": 3, "spacingM": 2.5, "frostResistance": "высокая", "ripening": "июнь–июль", "description": "Не переносит переувлажнения; закладывать на возвышении."} },
-          { id: 'sweetcherry', name: 'Черешня', category: 'fruit_tree', subcategory: 'fruit_trees', icon: 'Apple', objectType: 'tree', defaultProperties: { crownDiameter: 2.5, varieties: [] }, meta: {"heightM": 8, "spacingM": 4, "frostResistance": "низкая", "ripening": "июнь–июль", "description": "Черешня теплолюбива; обязательны зимостойкие подвои и опылители."} },
+          { id: 'apple', name: 'Яблоня', category: 'fruit_tree', subcategory: 'fruit_trees', icon: 'Apple', emoji: '🍎', objectType: 'tree', defaultProperties: { crownDiameter: 3, varieties: [] }, meta: {"heightM": 5, "spacingM": 3, "frostResistance": "высокая", "ripening": "август–октябрь", "description": "Светолюбива; подвой определяет итоговую высоту и схему посадки."} },
+          { id: 'pear', name: 'Груша', category: 'fruit_tree', subcategory: 'fruit_trees', icon: 'Apple', emoji: '🍐', objectType: 'tree', defaultProperties: { crownDiameter: 3, varieties: [] }, meta: {"heightM": 5, "spacingM": 3, "frostResistance": "средняя", "ripening": "сентябрь–октябрь", "description": "Теплолюбивее яблони; лучшие южные склоны, защита от ветра."} },
+          { id: 'plum', name: 'Слива', category: 'fruit_tree', subcategory: 'fruit_trees', icon: 'Apple', emoji: '🍑', objectType: 'tree', defaultProperties: { crownDiameter: 2.5, varieties: [] }, meta: {"heightM": 3, "spacingM": 2.5, "frostResistance": "средняя", "ripening": "июль–сентябрь", "description": "Требует опылителей; быстро даёт поросль, которую нужно удалять."} },
+          { id: 'cherry', name: 'Вишня', category: 'fruit_tree', subcategory: 'fruit_trees', icon: 'Apple', emoji: '🍒', objectType: 'tree', defaultProperties: { crownDiameter: 2, varieties: [] }, meta: {"heightM": 3, "spacingM": 2.5, "frostResistance": "высокая", "ripening": "июнь–июль", "description": "Не переносит переувлажнения; закладывать на возвышении."} },
+          { id: 'sweetcherry', name: 'Черешня', category: 'fruit_tree', subcategory: 'fruit_trees', icon: 'Apple', emoji: '🍒', objectType: 'tree', defaultProperties: { crownDiameter: 2.5, varieties: [] }, meta: {"heightM": 8, "spacingM": 4, "frostResistance": "низкая", "ripening": "июнь–июль", "description": "Черешня теплолюбива; обязательны зимостойкие подвои и опылители."} },
         ],
       },
       {
@@ -104,14 +106,14 @@ export const OBJECT_LIBRARY: LibraryCategory[] = [
         name: 'Кустовые',
         icon: 'Flower2',
         items: [
-          { id: 'gooseberry', name: 'Крыжовник', category: 'bush', subcategory: 'bushes', icon: 'Flower2', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 1.2, "spacingM": 1.5, "frostResistance": "высокая", "ripening": "июль", "description": "Крыжовник; устойчив к мучнистой росе — выбирать сорта «Финик» и аналоги."} },
-          { id: 'black_currant', name: 'Чёрная смородина', category: 'bush', subcategory: 'bushes', icon: 'Flower2', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 1.5, "spacingM": 1.5, "frostResistance": "высокая", "ripening": "июль–август", "description": "Теневынослива; любит влагу, обрезка старых ветвей каждые 4–5 лет."} },
-          { id: 'red_currant', name: 'Красная смородина', category: 'bush', subcategory: 'bushes', icon: 'Flower2', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 1.5, "spacingM": 1.3, "frostResistance": "высокая", "ripening": "июль", "description": "Засухоустойчивее чёрной; дольше держит урожай на старых ветвях."} },
-          { id: 'pink_currant', name: 'Розовая смородина', category: 'bush', subcategory: 'bushes', icon: 'Flower2', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 1.2, "spacingM": 1.2, "frostResistance": "высокая", "ripening": "июль–август", "description": "Розовая смородина; самоплодна, компактный куст."} },
-          { id: 'raspberry', name: 'Малина', category: 'bush', subcategory: 'bushes', icon: 'Flower2', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 1.8, "spacingM": 0.7, "frostResistance": "средняя", "ripening": "июль–сентябрь", "description": "Малина; шпалера обязательна, осенью вырезать отплодоносившие побеги."} },
-          { id: 'blackberry', name: 'Ежевика', category: 'bush', subcategory: 'bushes', icon: 'Flower2', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 2.0, "spacingM": 1.0, "frostResistance": "низкая", "ripening": "август–сентябрь", "description": "Ежевика; в холодных регионах — укрывной режим или морозостойкие бесшипые сорта."} },
-          { id: 'strawberry', name: 'Клубника', category: 'bush', subcategory: 'bushes', icon: 'Flower2', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"heightM": 0.3, "spacingM": 0.3, "frostResistance": "средняя", "ripening": "июнь–июль", "description": "Клубника; обновлять плантацию каждые 3–4 года, мульчировать."} },
-          { id: 'wild_strawberry', name: 'Земляника', category: 'bush', subcategory: 'bushes', icon: 'Flower2', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"heightM": 0.2, "spacingM": 0.2, "frostResistance": "высокая", "ripening": "июнь–июль", "description": "Земляника лесная; теневынослива, почвопокровный вариант."} },
+          { id: 'gooseberry', name: 'Крыжовник', category: 'bush', subcategory: 'bushes', icon: 'Flower2', emoji: '🫐', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 1.2, "spacingM": 1.5, "frostResistance": "высокая", "ripening": "июль", "description": "Крыжовник; устойчив к мучнистой росе — выбирать сорта «Финик» и аналоги."} },
+          { id: 'black_currant', name: 'Чёрная смородина', category: 'bush', subcategory: 'bushes', icon: 'Flower2', emoji: '🫐', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 1.5, "spacingM": 1.5, "frostResistance": "высокая", "ripening": "июль–август", "description": "Теневынослива; любит влагу, обрезка старых ветвей каждые 4–5 лет."} },
+          { id: 'red_currant', name: 'Красная смородина', category: 'bush', subcategory: 'bushes', icon: 'Flower2', emoji: '🔴', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 1.5, "spacingM": 1.3, "frostResistance": "высокая", "ripening": "июль", "description": "Засухоустойчивее чёрной; дольше держит урожай на старых ветвях."} },
+          { id: 'pink_currant', name: 'Розовая смородина', category: 'bush', subcategory: 'bushes', icon: 'Flower2', emoji: '🌸', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 1.2, "spacingM": 1.2, "frostResistance": "высокая", "ripening": "июль–август", "description": "Розовая смородина; самоплодна, компактный куст."} },
+          { id: 'raspberry', name: 'Малина', category: 'bush', subcategory: 'bushes', icon: 'Flower2', emoji: '🍇', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 1.8, "spacingM": 0.7, "frostResistance": "средняя", "ripening": "июль–сентябрь", "description": "Малина; шпалера обязательна, осенью вырезать отплодоносившие побеги."} },
+          { id: 'blackberry', name: 'Ежевика', category: 'bush', subcategory: 'bushes', icon: 'Flower2', emoji: '🍇', objectType: 'tree', defaultProperties: { ...bushDefaults }, meta: {"heightM": 2.0, "spacingM": 1.0, "frostResistance": "низкая", "ripening": "август–сентябрь", "description": "Ежевика; в холодных регионах — укрывной режим или морозостойкие бесшипые сорта."} },
+          { id: 'strawberry', name: 'Клубника', category: 'bush', subcategory: 'bushes', icon: 'Flower2', emoji: '🍓', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"heightM": 0.3, "spacingM": 0.3, "frostResistance": "средняя", "ripening": "июнь–июль", "description": "Клубника; обновлять плантацию каждые 3–4 года, мульчировать."} },
+          { id: 'wild_strawberry', name: 'Земляника', category: 'bush', subcategory: 'bushes', icon: 'Flower2', emoji: '🍓', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"heightM": 0.2, "spacingM": 0.2, "frostResistance": "высокая", "ripening": "июнь–июль", "description": "Земляника лесная; теневынослива, почвопокровный вариант."} },
         ],
       },
     ],
@@ -121,10 +123,10 @@ export const OBJECT_LIBRARY: LibraryCategory[] = [
     name: 'Цветы',
     icon: 'Flower',
     items: [
-      { id: 'lily', name: 'Лилии', category: 'flower', icon: 'Flower', objectType: 'tree', defaultProperties: { ...flowerDefaults }, meta: {"heightM": 1.0, "spacingM": 0.25, "frostResistance": "средняя", "ripening": "цветение VI–VIII", "description": "Лилии; дренаж обязателен, луковицы не переносят застоя воды."} },
-      { id: 'orchid', name: 'Орхидеи', category: 'flower', icon: 'Flower', objectType: 'tree', defaultProperties: { ...flowerDefaults }, meta: {"heightM": 0.5, "frostResistance": "низкая", "description": "Садовая орхидея (любка/венерин башмачок); кислая дренированная почва, без пересадок."} },
-      { id: 'rose', name: 'Розы', category: 'flower', icon: 'Flower', objectType: 'tree', defaultProperties: { crownDiameter: 0.5 }, meta: {"heightM": 1.5, "spacingM": 0.5, "frostResistance": "средняя", "ripening": "цветение VI–IX", "description": "Розы; солнечное место, защита от холодных ветров, ежегодная обрезка."} },
-      { id: 'tulip', name: 'Тюльпаны', category: 'flower', icon: 'Flower', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"heightM": 0.4, "spacingM": 0.15, "frostResistance": "высокая", "ripening": "цветение IV–V", "description": "Тюльпаны; однолетнее высаживание осенних луковичных, выкопка после пожелтения листа."} },
+      { id: 'lily', name: 'Лилии', category: 'flower', icon: 'Flower', emoji: '🌺', objectType: 'tree', defaultProperties: { ...flowerDefaults }, meta: {"heightM": 1.0, "spacingM": 0.25, "frostResistance": "средняя", "ripening": "цветение VI–VIII", "description": "Лилии; дренаж обязателен, луковицы не переносят застоя воды."} },
+      { id: 'orchid', name: 'Орхидеи', category: 'flower', icon: 'Flower', emoji: '🌷', objectType: 'tree', defaultProperties: { ...flowerDefaults }, meta: {"heightM": 0.5, "frostResistance": "низкая", "description": "Садовая орхидея (любка/венерин башмачок); кислая дренированная почва, без пересадок."} },
+      { id: 'rose', name: 'Розы', category: 'flower', icon: 'Flower', emoji: '🌹', objectType: 'tree', defaultProperties: { crownDiameter: 0.5 }, meta: {"heightM": 1.5, "spacingM": 0.5, "frostResistance": "средняя", "ripening": "цветение VI–IX", "description": "Розы; солнечное место, защита от холодных ветров, ежегодная обрезка."} },
+      { id: 'tulip', name: 'Тюльпаны', category: 'flower', icon: 'Flower', emoji: '🌷', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"heightM": 0.4, "spacingM": 0.15, "frostResistance": "высокая", "ripening": "цветение IV–V", "description": "Тюльпаны; однолетнее высаживание осенних луковичных, выкопка после пожелтения листа."} },
     ],
   },
   {
@@ -132,9 +134,9 @@ export const OBJECT_LIBRARY: LibraryCategory[] = [
     name: 'Кустарники',
     icon: 'TreeDeciduous',
     items: [
-      { id: 'spirea', name: 'Спирея', category: 'shrub', icon: 'TreeDeciduous', objectType: 'tree', defaultProperties: { crownDiameter: 1 }, meta: {"heightM": 1.5, "spacingM": 0.8, "frostResistance": "высокая", "ripening": "цветение V–VII", "description": "Спирея; формующая стрижка после цветения, живучая городская культура."} },
-      { id: 'lilac', name: 'Сирень', category: 'shrub', icon: 'TreeDeciduous', objectType: 'tree', defaultProperties: { crownDiameter: 2 }, meta: {"heightM": 4, "spacingM": 2, "frostResistance": "высокая", "ripening": "цветение V–VI", "description": "Сирень; светолюбива, плохо переносит близость грунтовых вод."} },
-      { id: 'hydrangea', name: 'Гортензия', category: 'shrub', icon: 'TreeDeciduous', objectType: 'tree', defaultProperties: { crownDiameter: 1.2 }, meta: {"heightM": 1.5, "spacingM": 1, "frostResistance": "средняя", "ripening": "цветение VII–IX", "description": "Гортензия; полутень, кислая почва; крупнолистную — укрывать на зиму."} },
+      { id: 'spirea', name: 'Спирея', category: 'shrub', icon: 'TreeDeciduous', emoji: '🌿', objectType: 'tree', defaultProperties: { crownDiameter: 1 }, meta: {"heightM": 1.5, "spacingM": 0.8, "frostResistance": "высокая", "ripening": "цветение V–VII", "description": "Спирея; формующая стрижка после цветения, живучая городская культура."} },
+      { id: 'lilac', name: 'Сирень', category: 'shrub', icon: 'TreeDeciduous', emoji: '💜', objectType: 'tree', defaultProperties: { crownDiameter: 2 }, meta: {"heightM": 4, "spacingM": 2, "frostResistance": "высокая", "ripening": "цветение V–VI", "description": "Сирень; светолюбива, плохо переносит близость грунтовых вод."} },
+      { id: 'hydrangea', name: 'Гортензия', category: 'shrub', icon: 'TreeDeciduous', emoji: '💠', objectType: 'tree', defaultProperties: { crownDiameter: 1.2 }, meta: {"heightM": 1.5, "spacingM": 1, "frostResistance": "средняя", "ripening": "цветение VII–IX", "description": "Гортензия; полутень, кислая почва; крупнолистную — укрывать на зиму."} },
     ],
   },
   {
@@ -142,12 +144,12 @@ export const OBJECT_LIBRARY: LibraryCategory[] = [
     name: 'Саженцы',
     icon: 'Sprout',
     items: [
-      { id: 'potato', name: 'Картошка', category: 'seedling', icon: 'Sprout', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.6, "ripening": "сбор VII–IX", "description": "Картофель; окучивание 2–3 раза за сезон, севооборот — возвращать на место через 3–4 года."} },
-      { id: 'cucumber', name: 'Огурцы', category: 'seedling', icon: 'Sprout', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.4, "ripening": "сбор VI–VIII", "description": "Огурцы; вертикальная шпалера экономит площадь, полив тёплой водой."} },
-      { id: 'tomato', name: 'Помидоры', category: 'seedling', icon: 'Sprout', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.5, "ripening": "сбор VII–IX", "description": "Помидоры; пасынкование индетерминантных сортов, подвязка обязательна."} },
-      { id: 'onion', name: 'Лук', category: 'seedling', icon: 'Sprout', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.2, "ripening": "сбор VII–VIII", "description": "Лук; не переносит свежего навоза, предшественники — огурцы, кабачки."} },
-      { id: 'garlic', name: 'Чеснок', category: 'seedling', icon: 'Sprout', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.2, "ripening": "сбор VII (озимый)", "description": "Чеснок; озимый — под зиму, яровой — ранней весной."} },
-      { id: 'pepper', name: 'Перец', category: 'seedling', icon: 'Sprout', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.4, "ripening": "сбор VIII–IX", "description": "Перец; теплолюбив, не переносит заморозков, рассадный метод."} },
+      { id: 'potato', name: 'Картошка', category: 'seedling', icon: 'Sprout', emoji: '🥔', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.6, "ripening": "сбор VII–IX", "description": "Картофель; окучивание 2–3 раза за сезон, севооборот — возвращать на место через 3–4 года."} },
+      { id: 'cucumber', name: 'Огурцы', category: 'seedling', icon: 'Sprout', emoji: '🥒', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.4, "ripening": "сбор VI–VIII", "description": "Огурцы; вертикальная шпалера экономит площадь, полив тёплой водой."} },
+      { id: 'tomato', name: 'Помидоры', category: 'seedling', icon: 'Sprout', emoji: '🍅', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.5, "ripening": "сбор VII–IX", "description": "Помидоры; пасынкование индетерминантных сортов, подвязка обязательна."} },
+      { id: 'onion', name: 'Лук', category: 'seedling', icon: 'Sprout', emoji: '🧅', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.2, "ripening": "сбор VII–VIII", "description": "Лук; не переносит свежего навоза, предшественники — огурцы, кабачки."} },
+      { id: 'garlic', name: 'Чеснок', category: 'seedling', icon: 'Sprout', emoji: '🧄', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.2, "ripening": "сбор VII (озимый)", "description": "Чеснок; озимый — под зиму, яровой — ранней весной."} },
+      { id: 'pepper', name: 'Перец', category: 'seedling', icon: 'Sprout', emoji: '🌶️', objectType: 'seedling', defaultProperties: { ...seedlingDefaults }, meta: {"spacingM": 0.4, "ripening": "сбор VIII–IX", "description": "Перец; теплолюбив, не переносит заморозков, рассадный метод."} },
     ],
   },
 ];
