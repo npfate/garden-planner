@@ -4,7 +4,7 @@ import type { ActivityEvent, GardenObject, IsoDate } from '../types/garden';
 import { formatDateRu, isoYear, todayIso } from '../utils/markers';
 import { isVisibleAt, isVisibleInYear, lifeBounds, makeEvent, momentOf } from '../utils/wayback';
 import { ACTIVITY_META } from '../config/activity';
-import { getLibraryItem } from '../constants/objectLibrary';
+import { getLibraryItem, LIBRARY_ITEMS_FLAT } from '../constants/objectLibrary';
 
 // Поиск fabric-объекта по garden-id. Локальный хелпер (в components/Canvas/fabricSync
 // такая же функция есть, но импорт оттуда создал бы цикл store -> components).
@@ -381,11 +381,15 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       // libraryItemId / crownDiameter отсутствовали. Подтягиваем дефолты из
       // Библиотеки объектов по типу, чтобы Инвентарь и Панель свойств
       // корректно группировали и отображали legacy-экземпляры.
-      const TYPE_TO_LIBRARY_ITEM: Partial<Record<GardenObject['type'], string>> = {
-        bed: 'bed',
-        greenhouse: 'greenhouse',
-        building: 'house',
-      };
+      // Строим карту «тип объекта -> первый подходящий шаблон» один раз из
+      // LIBRARY_ITEMS_FLAT: если в библиотеке появятся новые типы (tree,
+      // seedling, flower...), миграция подхватит их автоматически.
+      const TYPE_TO_LIBRARY_ITEM: Partial<Record<GardenObject['type'], string>> = {};
+      for (const item of LIBRARY_ITEMS_FLAT) {
+        if (!(item.objectType in TYPE_TO_LIBRARY_ITEM)) {
+          TYPE_TO_LIBRARY_ITEM[item.objectType] = item.id;
+        }
+      }
       const objects: GardenObject[] = rawObjects.map((o) => {
         if (!o.libraryItemId) {
           const fallbackId = TYPE_TO_LIBRARY_ITEM[o.type];
