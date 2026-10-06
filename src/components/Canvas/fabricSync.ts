@@ -1,4 +1,4 @@
-import { FabricImage, Group, Line, Rect, Triangle } from 'fabric';
+import { FabricImage, Group, Line, Rect, Text, Triangle } from 'fabric';
 import type { Canvas as FabricCanvas, FabricObject } from 'fabric';
 import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
 import type { GardenObject } from '../../types/garden';
@@ -122,7 +122,130 @@ export function createFabricObjectFromEntry(entry: GardenObject): Rect {
   setGardenId(rect, entry.id);
   setObjectType(rect, entry.type);
   applyObjectDefaults(rect);
+  attachVarietyLabel(rect, entry);
   return rect;
+}
+
+// --- Подпись сортов под объектом (для деревьев с прививками) ---
+
+const VARIETY_LABEL_KEY = '__gardenVarietyLabel';
+const VARIETY_OWNER_KEY = '__gardenOwnerId';
+
+export function isVarietyLabel(obj: FabricObject): boolean {
+  return (obj as unknown as Record<string, unknown>)[VARIETY_LABEL_KEY] === true;
+}
+
+// id дерева-владельца подписи (для каскадного удаления в reconcile)
+function getVarietyLabelOwnerId(obj: FabricObject): string {
+  const v = (obj as unknown as Record<string, unknown>)[VARIETY_OWNER_KEY];
+  return typeof v === 'string' ? v : '';
+}
+
+function markAsVarietyLabel(obj: FabricObject): void {
+  (obj as unknown as Record<string, unknown>)[VARIETY_LABEL_KEY] = true;
+}
+
+// Текст со списком сортов под деревом (несколько сортов = прививки).
+export function buildVarietyLabel(entry: GardenObject, ownerId?: string): Text | null {
+  if (entry.type !== 'tree' || entry.varieties.length < 2) return null;
+  const label = new Text(entry.varieties.map((v) => v.name).join(', '), {
+    left: (entry.x ?? 0) + Math.max(entry.width, 1) / 2,
+    top: (entry.y ?? 0) + Math.max(entry.height, 1) + 4,
+    originX: 'center',
+    originY: 'top',
+    fontSize: 11,
+    fontFamily: 'Inter, sans-serif',
+    fill: '#374151',
+    textAlign: 'center',
+    selectable: false,
+    evented: false,
+  });
+  markAsVarietyLabel(label);
+  // ссылка на владельца — для удаления подписи вместе с деревом (reconcile)
+  (label as unknown as Record<string, unknown>)[VARIETY_OWNER_KEY] = ownerId ?? entry.id;
+  return label;
+}
+
+// Вешаем подпись на основной объект как extra: она двигается вместе с ним
+// и автоматически удаляется при удалении/скрытии дерева (см. reconcile).
+// ВАЖНО: extra — служебный массив fabric v6, объекты из него НЕ попадают на
+// canvas сами по себе, поэтому подпись добавляем в canvas явно (иначе её не
+// видно). При drag'е позицию подписи обновляет syncFabricObjectToStore.
+function attachVarietyLabel(rect: Rect, entry: GardenObject): void {
+  const label = buildVarietyLabel(entry, getGardenId(rect) ?? entry.id);
+  if (!label) return;
+  rect.set({ extra: [label] });
+}
+
+// Добавить подпись сортов существующего объекта на canvas (после canvas.add(rect)).
+export function addVarietyLabelToCanvas(canvas: FabricCanvas, obj: FabricObject): void {
+  const extras = (obj.get('extra') as FabricObject[] | undefined) ?? [];
+  for (const l of extras.filter(isVarietyLabel)) canvas.add(l);
+}
+
+// Обновить (или убрать) подпись сортов у существующего fabric-объекта.
+export function refreshVarietyLabel(canvas: FabricCanvas, entry: GardenObject): void {
+  const obj = findObjectByGardenId(canvas, entry.id);
+  if (!obj) return;
+  removeVarietyLabels(canvas, obj);
+  const label = buildVarietyLabel(entry, entry.id);
+  if (label) {
+    // позиция — относительно ФАКТИЧЕСКИХ размеров объекта на canvas
+    // (могли измениться рамкой трансформации до правки сортов)
+    label.set({
+      left: (obj.left ?? 0) + Math.max(obj.getScaledWidth(), 1) / 2,
+      top: (obj.top ?? 0) + Math.max(obj.getScaledHeight(), 1) + 4,
+    });
+    obj.set({ extra: [...((obj.get('extra') as FabricObject[] | undefined) ?? []), label] });
+    canvas.add(label);
+  }
+  canvas.renderAll();
+}
+
+// Удалить ВСЕ подписи сортов с canvas и из extra объектов (перед полным
+// пересозданием слоя при загрузке проекта).
+export function clearVarietyLabels(canvas: FabricCanvas): void {
+  for (const obj of [...canvas.getObjects()]) {
+    if (isVarietyLabel(obj)) canvas.remove(obj);
+  }
+  for (const obj of canvas.getObjects()) {
+    const extras = (obj.get('extra') as FabricObject[] | undefined) ?? [];
+    if (extras.some(isVarietyLabel)) obj.set({ extra: extras.filter((e) => !isVarietyLabel(e)) });
+  }
+}
+
+// Удалить подписи сортов, «прикреплённые» к объекту (из extra и с canvas).
+function removeVarietyLabels(canvas: FabricCanvas, obj: FabricObject): void {
+  const extras = (obj.get('extra') as FabricObject[] | undefined) ?? [];
+  const labels = extras.filter(isVarietyLabel);
+  for (const l of labels) canvas.remove(l);
+  if (labels.length > 0) obj.set({ extra: extras.filter((e) => !isVarietyLabel(e)) });
+}
+
+// Инкрементальное обновление позиции/размера существующего fabric-объекта
+// из записи store (используется reconcile'ом). Объект НЕ пересоздаётся —
+// иначе сбрасывается размер, увеличенный пользователем рамкой трансформации.
+function updateFabricObjectGeometry(existing: FabricObject, entry: GardenObject): void {
+  if (Math.abs((existing.left ?? 0) - entry.x) > 0.5 || Math.abs((existing.top ?? 0) - entry.y) > 0.5) {
+    existing.set({ left: entry.x, top: entry.y });
+  }
+  const w = Math.max(existing.getScaledWidth(), 0);
+  const h = Math.max(existing.getScaledHeight(), 0);
+  if (Math.abs(w - entry.width) > 0.5 || Math.abs(h - entry.height) > 0.5) {
+    existing.set({
+      width: Math.max(entry.width / (existing.scaleX || 1), 1),
+      height: Math.max(entry.height / (existing.scaleY || 1), 1),
+    });
+  }
+  // Подпись сортов следует за новыми координатами/размерами дерева
+  const extras = (existing.get('extra') as FabricObject[] | undefined) ?? [];
+  for (const l of extras.filter(isVarietyLabel)) {
+    l.set({
+      left: (existing.left ?? 0) + Math.max(existing.getScaledWidth(), 1) / 2,
+      top: (existing.top ?? 0) + Math.max(existing.getScaledHeight(), 1) + 4,
+    });
+  }
+  existing.setCoords();
 }
 
 // --- Стрелки пересадок (пунктир «откуда → куда») ---
@@ -244,10 +367,19 @@ export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
   const visible = state.visibleObjects();
   const entriesById = new Map(visible.map((o) => [o.id, o]));
 
-  // 1) Удаляем fabric-объекты, скрытые временем или удалённые из store
+  // 1) Удаляем fabric-объекты, скрытые временем или удалённые из store.
+  // Подписи сортов (isVarietyLabel) не имеют gardenId — удаляем их вместе с
+  // родительским деревом по флагу __gardenOwnerId (см. buildVarietyLabel).
+  const removedIds = new Set<string>();
   for (const obj of [...canvas.getObjects()]) {
     const id = getGardenId(obj);
-    if (id && !entriesById.has(id)) canvas.remove(obj);
+    if (id && !entriesById.has(id)) {
+      canvas.remove(obj);
+      removedIds.add(id);
+    }
+  }
+  for (const obj of [...canvas.getObjects()]) {
+    if (isVarietyLabel(obj) && removedIds.has(getVarietyLabelOwnerId(obj))) canvas.remove(obj);
   }
 
   // 2) Добавляем/обновляем видимые объекты из store
@@ -264,29 +396,16 @@ export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
       // пересоздаваться при следующем reconcile (иначе потеряется размер)
       markAsCreatedOnCanvas(rect);
       canvas.add(rect);
+      addVarietyLabelToCanvas(canvas, rect); // подпись сортов видима только на canvas
       continue;
     }
 
     existing.set({ opacity });
 
-    // Позиция могла измениться (drag на canvas, пересадка) — подтягиваем из store.
-    if (Math.abs((existing.left ?? 0) - entry.x) > 0.5 || Math.abs((existing.top ?? 0) - entry.y) > 0.5) {
-      existing.set({ left: entry.x, top: entry.y });
-    }
-
-    // Размер: fabric-объекты никогда не пересоздаём — иначе сбрасывается
-    // размер, увеличенный пользователем рамкой трансформации (баг: «увеличил
-    // дерево → отмотал дату назад/вперёд → квадратик»). При расхождении
-    // размеров (например, загрузка .garden-файла) обновляем существующий
-    // объект инкрементально, сохраняя его идентичность и выделение.
-    const w = Math.max(existing.getScaledWidth(), 0);
-    const h = Math.max(existing.getScaledHeight(), 0);
-    if (Math.abs(w - entry.width) > 0.5 || Math.abs(h - entry.height) > 0.5) {
-      existing.set({
-        width: Math.max(entry.width / (existing.scaleX || 1), 1),
-        height: Math.max(entry.height / (existing.scaleY || 1), 1),
-      });
-    }
+    // Позиция/размер могли измениться (drag, resize, пересадка, загрузка
+    // файла) — подтягиваем из store инкрементально, сохраняя идентичность
+    // объекта и его выделение.
+    updateFabricObjectGeometry(existing, entry);
   }
 
   // Сохраняем выделение, если объект всё ещё виден

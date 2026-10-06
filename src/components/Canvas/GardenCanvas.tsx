@@ -25,6 +25,7 @@ import {
   loadBackgroundImage,
   setBackgroundSelectable,
   syncFabricObjectToStore,
+  refreshVarietyLabel,
 } from './fabricSync';
 
 // Эмодзи-маркеры плодовых/декоративных деревьев (для типов 'tree').
@@ -700,6 +701,26 @@ export default function GardenCanvas() {
   useEffect(() => {
     if (fabricRef.current) drawTransplantHints(fabricRef.current);
   }, [selectedObjectId]);
+
+  // Шаг 7.1: при изменении набора сортов дерева (добавление/удаление через
+  // PropertiesPanel) перерисовываем подпись-список сортов под кроной.
+  // Считаем только сорта деревьев — компактная примитивная подписка, чтобы
+  // не возвращать новый объект на каждый рендер (риск бесконечного цикла).
+  const treeVarietiesKey = useGardenStore((s) =>
+    s.objects
+      .filter((o) => o.type === 'tree')
+      .map((o) => `${o.id}:${o.varieties.map((v) => v.name).join('|')}`)
+      .join(';'),
+  );
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    for (const entry of useGardenStore.getState().objects) {
+      if (entry.type !== 'tree') continue;
+      refreshVarietyLabel(canvas, entry);
+    }
+    canvas.renderAll();
+  }, [treeVarietiesKey]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full bg-background">
