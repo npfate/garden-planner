@@ -39,6 +39,35 @@ export function markAsBackground(obj: FabricObject): void {
   (obj as unknown as Record<string, unknown>)[BG_FLAG_KEY] = true;
 }
 
+// Runtime-тип объекта схемы (GardenObjectType) — нужен для hit-теста при
+// размещении растений внутрь грядок/парников (см. GardenCanvas.handleMouseDown).
+const OBJECT_TYPE_KEY = '__gardenObjectType';
+
+export function getObjectType(obj: FabricObject): string | null {
+  const v = (obj as unknown as Record<string, unknown>)[OBJECT_TYPE_KEY];
+  return typeof v === 'string' ? v : null;
+}
+
+export function setObjectType(obj: FabricObject, type: string): void {
+  (obj as unknown as Record<string, unknown>)[OBJECT_TYPE_KEY] = type;
+}
+
+/**
+ * Общие свойства ВСЕХ интерактивных объектов схемы:
+ * - strokeUniform — толщина обводки не растёт при ресайзе/масштабе камеры;
+ * - cornerSize 8  — компактные угловые маркеры (не перекрывают обзор);
+ * origin left/top и размеры задаются в createFabricObjectFromEntry.
+ */
+export function applyObjectDefaults(obj: FabricObject): void {
+  obj.set({
+    strokeUniform: true,
+    cornerSize: 8,
+    cornerColor: '#ffffff',
+    cornerStrokeColor: '#1e6f3c',
+    transparentCorners: false,
+  });
+}
+
 export function findObjectByGardenId(canvas: FabricCanvas, id: string): FabricObject | undefined {
   return canvas.getObjects().find((o) => getGardenId(o) === id);
 }
@@ -91,6 +120,8 @@ export function createFabricObjectFromEntry(entry: GardenObject): Rect {
   });
   if (entry.rotation) rect.set({ angle: entry.rotation });
   setGardenId(rect, entry.id);
+  setObjectType(rect, entry.type);
+  applyObjectDefaults(rect);
   return rect;
 }
 

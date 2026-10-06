@@ -7,13 +7,14 @@ import type { ToolId } from '../../store/gardenStore';
 import type { GardenObject, GardenObjectType, IsoDate } from '../../types/garden';
 import { MARKER_SIZE, todayIso } from '../../utils/markers';
 import { makeEvent } from '../../utils/wayback';
-import { getLibraryItem, LIBRARY_ITEMS_FLAT } from '../../constants/objectLibrary';
+import { getLibraryItem, LIBRARY_ITEMS_FLAT, isPlantTool } from '../../constants/objectLibrary';
 import { PIXELS_PER_METER } from './fabricSync';
 import {
   createFabricObjectFromEntry,
   drawGrid,
   drawTransplantHints,
   findObjectByGardenId,
+  getObjectType,
   isTransplantLine,
   markAsCreatedOnCanvas,
   reconcileObjectsWithStore,
@@ -286,12 +287,12 @@ export default function GardenCanvas() {
       bedDraftRef.current = null;
     };
 
-    const placeTreeMarker = (pointer: Point, plantDate?: string | null): void => {
-      placeMarkerEntry('tree', 'Яблоня', MARKER_SIZE, pointer, plantDate ?? undefined);
+    const placeTreeMarker = (pointer: Point, plantDate?: string | null, parentId?: string | null): void => {
+      placeMarkerEntry('tree', 'Яблоня', MARKER_SIZE, pointer, plantDate ?? undefined, undefined, undefined, undefined, parentId);
     };
 
     // Размещение произвольного шаблона из Библиотеки объектов ('place:<itemId>').
-    const placeLibraryItem = (pointer: Point, itemId: string): void => {
+    const placeLibraryItem = (pointer: Point, itemId: string, parentId?: string | null): void => {
       const tpl = getLibraryItem(itemId);
       if (!tpl) return;
       const dp = tpl.defaultProperties;
@@ -301,7 +302,7 @@ export default function GardenCanvas() {
       const widthPx = defW !== undefined ? defW * PIXELS_PER_METER : crown !== undefined ? crown * PIXELS_PER_METER : MARKER_SIZE;
       const heightPx = defH !== undefined ? defH * PIXELS_PER_METER : crown !== undefined ? crown * PIXELS_PER_METER : MARKER_SIZE;
       const emoji = tpl.objectType === 'tree' ? EMOJI_BY_LIBRARY_ID[itemId] ?? '🌳' : null;
-      placeMarkerEntry(tpl.objectType, tpl.name, widthPx, pointer, undefined, heightPx, emoji, itemId);
+      placeMarkerEntry(tpl.objectType, tpl.name, widthPx, pointer, undefined, heightPx, emoji, itemId, parentId);
     };
 
     // Общий путь создания записи + fabric-объекта (дерево/метка/шаблон библиотеки).
@@ -314,6 +315,7 @@ export default function GardenCanvas() {
       height?: number,
       customIcon?: string | null,
       libraryItemId?: string,
+      parentId?: string | null,
     ): void => {
       const snapped = getSnapPoint(pointer.x, pointer.y);
       const gs = useGardenStore.getState();
@@ -329,6 +331,8 @@ export default function GardenCanvas() {
         plantDate,
         libraryItemId,
       );
+      // Растение, посаженное кликом внутри грядки/парника, привязывается к нему.
+      if (parentId) entry.parentId = parentId;
       gs.addObject(entry);
 
       const marker = createFabricObjectFromEntry(entry);
@@ -369,6 +373,20 @@ export default function GardenCanvas() {
           selectByObject(null);
         }
         return;
+      }
+
+      // Инструменты размещения: клик по существующему объекту или его
+      // контролам НЕ должен создавать новый объект — перемещение/ресайз
+      // обрабатывает сам Fabric.js (нативное поведение). Размещение внутри
+      // грядки/парника разрешено всегда, но только для растений (см. ниже).
+      const downTarget = event.target as FabricObject | null | undefined;
+      let placementParentId: string | null = null;
+      if (downTarget && getGardenId(downTarget)) {
+        const targetType = getObjectType(downTarget);
+        const isContainer = targetType === 'bed' || targetType === 'greenhouse';
+        const plantTool = tool === 'bed' ? false : isPlantTool(tool);
+        if (!(isContainer && plantTool)) return;
+        placementParentId = getGardenId(downTarget);
       }
 
       // Shift + перетаскивание при активном инструменте рисования — переместить объект,
@@ -413,13 +431,13 @@ export default function GardenCanvas() {
       }
 
       if (tool === 'tree') {
-        placeTreeMarker(canvas.getScenePoint(event.e), useGardenStore.getState().viewDate);
+        placeTreeMarker(canvas.getScenePoint(event.e), useGardenStore.getState().viewDate, placementParentId);
         return;
       }
 
       // Инструменты размещения из Библиотеки объектов: 'place:<itemId>'.
       if (tool.startsWith('place:')) {
-        placeLibraryItem(canvas.getScenePoint(event.e), tool.slice('place:'.length));
+        placeLibraryItem(canvas.getScenePoint(event.e), tool.slice('place:'.length), placementParentId);
       }
     };
 

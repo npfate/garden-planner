@@ -171,3 +171,21 @@ export const ALL_CATEGORIES_FLAT: LibraryCategory[] = OBJECT_LIBRARY.flatMap(
 export function getCategoryName(categoryId: string): string {
   return ALL_CATEGORIES_FLAT.find((c) => c.id === categoryId)?.name ?? '';
 }
+
+// «Растения» — категории, которые можно размещать ВНУТРИ грядок/парников
+// (при клике по контейнеру активным инструментом размещения). Постройки,
+// тропы и прочая инфраструктура внутрь контейнера не сажаются.
+const PLANT_CATEGORY_IDS: LibraryCategoryId[] = ['tree', 'fruit_tree', 'bush', 'flower', 'shrub', 'seedling'];
+
+/** Является ли шаблон библиотеки растением (дерево/куст/цветок/саженец)? */
+export function isPlantLibraryItem(itemId: string): boolean {
+  const item = getLibraryItem(itemId);
+  return !!item && PLANT_CATEGORY_IDS.includes(item.category);
+}
+
+/** Инструмент размещения растения? Принимает 'place:<itemId>' и legacy 'tree'. */
+export function isPlantTool(toolId: string): boolean {
+  if (toolId === 'tree') return true; // legacy-инструмент «Яблоня»
+  if (!toolId.startsWith('place:')) return false;
+  return isPlantLibraryItem(toolId.slice('place:'.length));
+}
