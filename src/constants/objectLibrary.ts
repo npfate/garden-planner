@@ -150,3 +150,13 @@ export const LIBRARY_ITEMS_FLAT: LibraryItem[] = OBJECT_LIBRARY.flatMap((cat) =>
 export function getLibraryItem(id: string): LibraryItem | undefined {
   return LIBRARY_ITEMS_FLAT.find((item) => item.id === id);
 }
+
+// Плоский список всех категорий (верхний уровень + дочерние подкатегории).
+// Нужен для отображения пути категории в UI (Инвентарь, поиск).
+export const ALL_CATEGORIES_FLAT: LibraryCategory[] = OBJECT_LIBRARY.flatMap(
+  (cat) => [cat, ...(cat.children ?? [])],
+);
+
+export function getCategoryName(categoryId: string): string {
+  return ALL_CATEGORIES_FLAT.find((c) => c.id === categoryId)?.name ?? '';
+}
