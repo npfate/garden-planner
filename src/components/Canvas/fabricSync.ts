@@ -2,7 +2,7 @@ import { FabricImage, Group, Line, Rect, Triangle } from 'fabric';
 import type { Canvas as FabricCanvas, FabricObject } from 'fabric';
 import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
 import type { GardenObject } from '../../types/garden';
-import { MARKER_SIZE, getMarkerColor } from '../../utils/markers';
+import { getMarkerColor } from '../../utils/markers';
 import { isVisibleInYear } from '../../utils/wayback';
 
 export const GRID_COLOR = '#E5E7EB';
@@ -63,17 +63,17 @@ export function createFabricObjectFromEntry(entry: GardenObject): Rect {
   const width = Math.max(entry.width, 1);
   const height = Math.max(entry.height, 1);
 
-  // Метка, посаженная кликом, имеет размер MARKER_SIZE и рисуется как точка
-  // (origin center); увеличенная рамкой — уже полноценный прямоугольник.
-  const isMarkerSize = !isBed && width <= MARKER_SIZE + 0.5 && height <= MARKER_SIZE + 0.5;
-
+  // Все объекты строятся с origin left/top: координаты x/y в store — это левый
+  // верхний угол. Раньше метки-точки рисовались с origin center, из-за чего
+  // фактический центр объекта смещался на полразмера от (x + w/2, y + h/2) —
+  // рамка выделения при фокусе из Инвентаря «прыгала» мимо объекта.
   const rect = new Rect({
     left: entry.x,
     top: entry.y,
     width,
     height,
-    originX: isMarkerSize ? 'center' : 'left',
-    originY: isMarkerSize ? 'center' : 'top',
+    originX: 'left',
+    originY: 'top',
     selectable: true,
     evented: true,
     objectCaching: false,

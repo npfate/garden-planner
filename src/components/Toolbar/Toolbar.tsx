@@ -1,9 +1,7 @@
 import { useRef } from 'react';
 import {
   MousePointer2,
-  Square,
   Hand,
-  Sprout,
   ZoomIn,
   ZoomOut,
   Image as ImageIcon,
@@ -22,11 +20,11 @@ type ToolbarTool = {
   icon: typeof MousePointer2;
 };
 
+// Размещение объектов (грядки, деревья и т.д.) — только через вкладку
+// «Библиотека объектов» левой панели; здесь остаются навигационные инструменты.
 const TOOLS: ToolbarTool[] = [
   { id: 'select', label: 'Выделение', icon: MousePointer2 },
   { id: 'pan', label: 'Рука (Перемещение схемы)', icon: Hand },
-  { id: 'bed', label: 'Грядка', icon: Square },
-  { id: 'tree', label: 'Добавить дерево', icon: Sprout },
 ];
 
 const btnClass =
@@ -84,11 +82,7 @@ export default function Toolbar() {
           <button
             key={id}
             type="button"
-            title={
-              id === 'bed' || id === 'tree'
-                ? `${label} — несколько подряд; Esc или повторный клик по кнопке — выход (Shift+drag — двигать объект)`
-                : label
-            }
+            title={label}
             aria-label={label}
             onClick={() => setActiveTool(activeTool === id ? 'select' : id)}
             className={`${btnClass} ${activeTool === id ? 'bg-primary text-white border-primary' : ''}`}
