@@ -22,6 +22,7 @@ import {
   getSnapPoint,
   snapValue,
   isBackgroundObject,
+  isGridObject,
   loadBackgroundImage,
   setBackgroundSelectable,
   syncFabricObjectToStore,
@@ -407,6 +408,10 @@ export default function GardenCanvas() {
       // обрабатывает сам Fabric.js (нативное поведение). Размещение внутри
       // грядки/парника разрешено всегда, но только для растений (см. ниже).
       const downTarget = event.target as FabricObject | null | undefined;
+      // Подписи сортов, сетка и служебные объекты не участвуют в hit-тесте
+      if (downTarget && (isVarietyLabel(downTarget) || isGridObject(downTarget) || isBackgroundObject(downTarget))) {
+        return;
+      }
       let placementParentId: string | null = null;
       if (downTarget && getGardenId(downTarget)) {
         const targetType = getObjectType(downTarget);
