@@ -254,27 +254,34 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   // wayback-фильтром, но камера всё равно покажет его место).
   focusOnObject: (id: string): void => {
     const state = get();
+    // Если активен инструмент размещения (Библиотека/тулбар), клик в Инвентаре
+    // должен переключить на «Выделение», иначе сразу после фокуса канвас
+    // проигнорирует выделение («выделяется другое место»).
+    useCanvasStore.getState().setActiveTool('select');
+    // Клик по пустому месту вне холста не порождает событие selection:cleared,
+    // поэтому снимаем выделение с канваса вручную — иначе рамка выделения
+    // останется на старом объекте, а Инвентарь подсветит другой.
+    state.canvas?.discardActiveObject();
     set({ selectedObjectId: id });
     const canvas = state.canvas;
     if (!canvas) return;
-    let cx: number;
-    let cy: number;
+    const entry = state.objects.find((o) => o.id === id);
+    if (!entry) return;
+    // Центр считаем из записи store — это единственный источник истины.
+    // getCenterPoint() у fabric-объекта при originX/'Y' = 'center' возвращает
+    // смещённую точку (левый верхний угол вместо центра), поэтому к нему
+    // обращаться нельзя.
+    const cx = entry.x + entry.width / 2;
+    const cy = entry.y + entry.height / 2;
     const fabricObj = findFabricObjectByGardenId(canvas, id);
-    if (fabricObj) {
-      const center = fabricObj.getCenterPoint();
-      cx = center.x;
-      cy = center.y;
-      canvas.setActiveObject(fabricObj);
-    } else {
-      const entry = state.objects.find((o) => o.id === id);
-      if (!entry) return;
-      cx = entry.x + entry.width / 2;
-      cy = entry.y + entry.height / 2;
-    }
+    if (fabricObj) canvas.setActiveObject(fabricObj);
+    const zoom = canvas.getZoom() || 1;
     const vpt = canvas.viewportTransform;
     if (!vpt) return;
-    vpt[4] = (canvas.getWidth() ?? 0) / 2 - cx * vpt[0];
-    vpt[5] = (canvas.getHeight() ?? 0) / 2 - cy * vpt[3];
+    vpt[0] = zoom;
+    vpt[3] = zoom;
+    vpt[4] = (canvas.getWidth() ?? 0) / 2 - cx * zoom;
+    vpt[5] = (canvas.getHeight() ?? 0) / 2 - cy * zoom;
     canvas.requestRenderAll();
   },
 
