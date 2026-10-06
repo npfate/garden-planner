@@ -12,6 +12,31 @@ import { isoYear, todayIso } from './markers';
 
 export const DEFAULT_LIFECYCLE = 'perennial' as const;
 
+
+
+// Чистая функция фильтрации (общий селектор wayback) — используется и
+// канвасом (fabricSync), и UI (Inventory), чтобы не создавать новых ссылок
+// внутри подписки Zustand (см. getVisibleObjects в сторе).
+// Правило пересадок: у объекта, который был пересажен (transplantedToId),
+// «живёт» только последняя запись цепочки — промежуточные места сами по
+// себе на схеме не показываются. Если же пересаженный объект позже выкопан
+// («выкопать» без новой посадки), его старое место снова становится актуальным.
+export function filterVisible(objects: GardenObject[], year: number, viewDate?: IsoDate | null): GardenObject[] {
+  const byId = new Map(objects.map((o) => [o.id, o]));
+  return objects.filter((o) => {
+    if (!isVisibleAt(o, year, viewDate)) return false;
+    if (o.transplantedToId) {
+      const next = byId.get(o.transplantedToId);
+      // Показываем только актуальное место цепочки пересадок. Проверка
+      // «живо ли следующее место» идёт через тот же isVisibleAt — раньше
+      // здесь было removedAt >= now, из-за чего в день выкопки следующего
+      // места скрывалось и прежнее (несогласованность с canvas-подпиской).
+      if (next && isVisibleAt(next, year, viewDate)) return false;
+    }
+    return true;
+  });
+}
+
 export function lifecycleOf(obj: GardenObject): 'perennial' | 'annual' {
   return obj.lifecycle ?? DEFAULT_LIFECYCLE;
 }

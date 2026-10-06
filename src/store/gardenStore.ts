@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Canvas as FabricCanvas } from 'fabric';
 import type { ActivityEvent, GardenObject, IsoDate } from '../types/garden';
 import { formatDateRu, isoYear, todayIso } from '../utils/markers';
-import { isVisibleAt, isVisibleInYear, lifeBounds, makeEvent, momentOf } from '../utils/wayback';
+import { filterVisible, makeEvent, momentOf } from '../utils/wayback';
 import { ACTIVITY_META } from '../config/activity';
 import { getLibraryItem, LIBRARY_ITEMS_FLAT } from '../constants/objectLibrary';
 
@@ -65,6 +65,10 @@ interface GardenActions {
   focusOnObject: (id: string) => void;
   setCanvas: (canvas: FabricCanvas | null) => void;
   visibleObjects: () => GardenObject[];
+  /** Кэш селектора visibleObjects для React-подписок (стабильная ссылка). */
+  _visibleCache: { objects: GardenObject[]; year: number; date: IsoDate | null; result: GardenObject[] } | null;
+  /** Кэшированный вариант visibleObjects() для React-подписок (стабильная ссылка). */
+  getVisibleObjects: () => GardenObject[];
   saveToFile: () => string;
   loadFromFile: (json: string) => void;
 }
@@ -81,12 +85,6 @@ const CURRENT_YEAR_DEFAULT = Number(todayIso().slice(0, 4));
 // Реализация — в utils/wayback.momentOf (переэкспортируем для совместности).
 export { momentOf } from '../utils/wayback';
 
-// Выкопан ли объект *до* указанной даты. Правило wayback: removedAt — дата
-// последнего дня жизни, поэтому сравнение строгое (<): в сам день выкопки
-// объект ещё виден на схеме. Синхронизировано с isVisibleAt в utils/wayback.
-function isDugBy(date: string, o: GardenObject): boolean {
-  return !!o.removedAt && o.removedAt < date;
-}
 
 export const useGardenStore = create<GardenStore>((set, get) => ({
   objects: [],
@@ -309,23 +307,22 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
   // актуальным и рисуется.
   visibleObjects: (): GardenObject[] => {
     const { objects, currentYear, viewDate } = get();
-    const byId = new Map(objects.map((o) => [o.id, o]));
-    const now = momentOf(viewDate);
-    return objects.filter((o) => {
-      if (!isVisibleInYear(o, currentYear)) return false;
-      // Единая временна́я проверка (посажен/выкопан на эту дату).
-      if (o.plantedAt && lifeBounds(o).start > now) return false; // ещё не посажен
-      if (isDugBy(now, o)) return false; // выкопан ДО этой даты (removedAt < now)
-      if (o.transplantedToId) {
-        const next = byId.get(o.transplantedToId);
-        // Показываем только актуальное место цепочки пересадок. Проверка
-        // «живо ли следующее место» идёт через тот же isVisibleAt — раньше
-        // здесь было removedAt >= now, из-за чего в день выкопки следующего
-        // места скрывалось и прежнее (несогласованность с canvas-подпиской).
-        if (next && isVisibleAt(next, currentYear, viewDate)) return false;
-      }
-      return true;
-    });
+    return filterVisible(objects, currentYear, viewDate);
+  },
+
+  // Кэш селектора для React-подписок (useSyncExternalStore): возвращает ту же
+  // ссылку на массив, пока входные данные (objects/currentYear/viewDate) не
+  // менялись. Без этого Inventory получал новый массив при каждом рендере ->
+  // "getSnapshot should be cached" и бесконечный цикл обновлений.
+  _visibleCache: null as { objects: GardenObject[]; year: number; date: IsoDate | null; result: GardenObject[] } | null,
+  getVisibleObjects: (): GardenObject[] => {
+    const { objects, currentYear, viewDate, _visibleCache } = get();
+    if (_visibleCache && _visibleCache.objects === objects && _visibleCache.year === currentYear && _visibleCache.date === viewDate) {
+      return _visibleCache.result;
+    }
+    const result = filterVisible(objects, currentYear, viewDate);
+    set({ _visibleCache: { objects, year: currentYear, date: viewDate, result } }, false);
+    return result;
   },
 
   // Собирает снапшот, подтягивая не-доменные поля из canvasStore.

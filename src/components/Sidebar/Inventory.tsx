@@ -57,9 +57,11 @@ interface Group {
 
 export default function Inventory() {
   // Единый источник истины для фильтра по времени — тот же селектор,
-  // которым канвас решает, что рисовать (реактивно подписывается на
-  // objects / currentYear / viewDate внутри стора).
-  const visibleObjects = useGardenStore((s) => s.visibleObjects());
+  // которым канвас решает, что рисовать (utils/wayback.filterVisible).
+  // getVisibleObjects() возвращает КЭШИРОВАННУЮ ссылку на массив: без кэша
+  // useSyncExternalStore получал бы новый массив при каждом рендере и
+  // зацикливал обновления ("The result of getSnapshot should be cached").
+  const visibleObjects = useGardenStore((s) => s.getVisibleObjects());
   const viewDate = useGardenStore((s) => s.viewDate);
   const currentYear = useGardenStore((s) => s.currentYear);
   const selectedObjectId = useGardenStore((s) => s.selectedObjectId);
