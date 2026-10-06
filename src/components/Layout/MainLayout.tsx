@@ -29,15 +29,12 @@ export default function MainLayout() {
         </header>
       )}
       <div className="flex-1 flex min-h-0">
-        {/* Вариант A: на странице «Схема» — узкая навигационная полоса + панель Библиотека/Инвентарь */}
-        {isSchemaPage ? (
-          <>
-            <NavRail />
-            <SchemaSidePanel />
-          </>
-        ) : (
-          <Sidebar />
-        )}
+        {/* Вариант A: узкая навигационная полоса NavRail присутствует на всех
+            страницах, чтобы навигация не «пропадала» при переключении вкладок.
+            На «Схеме» рядом с ней показывается панель Библиотека/Инвентарь,
+            на остальных страницах — широкий Sidebar как раньше. */}
+        <NavRail />
+        {isSchemaPage ? <SchemaSidePanel /> : <Sidebar />}
         <main className="flex-1 relative min-w-0 min-h-0 flex flex-col">
           {/* Canvas (схема) монтируется один раз и скрывается через hidden при переходах
               между вкладками; все остальные страницы рендерятся без обёртки hidden */}
