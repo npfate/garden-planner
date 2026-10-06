@@ -84,6 +84,33 @@ export default function PropertiesPanel() {
     }
   };
 
+  // Спринт 6, шаг 6.2: оценка привязана к конкретному сорту и году —
+  // history[currentYear].ratings[varietyId]. Toggle: повторный клик снимает оценку.
+  const toggleVarietyRating = (
+    varietyId: string,
+    varietyName: string,
+    value: Exclude<VarietyRating, null>,
+  ): void => {
+    const entryRatings = { ...(yearEntry.ratings ?? {}) };
+    const current = entryRatings[varietyId];
+    if (current === value) {
+      delete entryRatings[varietyId];
+    } else {
+      entryRatings[varietyId] = value;
+    }
+    setHistoryField({ ratings: entryRatings });
+    const applied = entryRatings[varietyId];
+    if (applied) {
+      addEvent(
+        makeEvent(
+          'rating',
+          object,
+          `Оценка сорта «${varietyName}» (${object.name}): ${applied === 'like' ? '👍 нравится' : '👎 не нравится'} (${currentYear})`,
+        ),
+      );
+    }
+  };
+
   // Сбор урожая: сумма копится в history[currentYear].harvest + событие в журнал.
   const addHarvest = (kg: number): void => {
     if (kg <= 0) return;
@@ -110,6 +137,21 @@ export default function PropertiesPanel() {
   };
   const removeVariety = (id: string): void => {
     updateObject(object.id, { varieties: object.varieties.filter((v) => v.id !== id) });
+    // Сорт удалён — чистим его оценки во всех годах, чтобы не копить «мусор».
+    const cleanedHistory: Record<number, typeof yearEntry> = {};
+    for (const [year, entry] of Object.entries(object.history)) {
+      if (!entry.ratings || !(id in entry.ratings)) {
+        cleanedHistory[Number(year)] = entry;
+        continue;
+      }
+      const rest = { ...entry };
+      if (rest.ratings) {
+        delete rest.ratings[id];
+        if (Object.keys(rest.ratings).length === 0) delete rest.ratings;
+      }
+      cleanedHistory[Number(year)] = rest;
+    }
+    updateObject(object.id, { history: cleanedHistory });
   };
 
   // Пересадка одним действием: старая запись «выкапывается» в выбранную дату,
@@ -228,22 +270,51 @@ export default function PropertiesPanel() {
           <div className="space-y-2">
             {object.varieties.length > 0 && (
               <ul className="space-y-1">
-                {object.varieties.map((v) => (
-                  <li
-                    key={v.id}
-                    className="flex items-center justify-between gap-2 rounded-md border border-border bg-white px-2 py-1 text-sm"
-                  >
-                    <span className="truncate">{v.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeVariety(v.id)}
-                      title="Удалить сорт"
-                      className="text-text-secondary hover:text-red-600 flex-shrink-0"
+                {object.varieties.map((v) => {
+                  const vRating = yearEntry.ratings?.[v.id] ?? null;
+                  return (
+                    <li
+                      key={v.id}
+                      className="flex items-center justify-between gap-2 rounded-md border border-border bg-white px-2 py-1 text-sm"
                     >
-                      <X size={14} />
-                    </button>
-                  </li>
-                ))}
+                      <span className="truncate">{v.name}</span>
+                      <span className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          type="button"
+                          title="Нравится сорт"
+                          onClick={() => toggleVarietyRating(v.id, v.name, 'like')}
+                          className={`h-6 w-6 flex items-center justify-center rounded border transition-colors ${
+                            vRating === 'like'
+                              ? 'bg-primary border-primary text-white'
+                              : 'border-border text-text-secondary hover:text-text-primary hover:bg-background'
+                          }`}
+                        >
+                          <ThumbsUp size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          title="Не нравится сорт"
+                          onClick={() => toggleVarietyRating(v.id, v.name, 'dislike')}
+                          className={`h-6 w-6 flex items-center justify-center rounded border transition-colors ${
+                            vRating === 'dislike'
+                              ? 'bg-red-500 border-red-500 text-white'
+                              : 'border-border text-text-secondary hover:text-text-primary hover:bg-background'
+                          }`}
+                        >
+                          <ThumbsDown size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeVariety(v.id)}
+                          title="Удалить сорт"
+                          className="text-text-secondary hover:text-red-600"
+                        >
+                          <X size={14} />
+                        </button>
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             <div className="flex gap-2">

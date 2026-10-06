@@ -37,9 +37,15 @@ export interface ActivityEvent {
 
 export type VarietyRating = 'like' | 'dislike' | null;
 
+// Совместимость со старыми .garden: до Спринта 6 оценка хранилась одной
+// на объект (history[year].rating). Теперь она привязана к сорту —
+// ratings[varietyId]. Поле rating оставлено для чтения legacy-файлов.
 export interface YearHistoryEntry {
   harvest?: number;
+  /** @deprecated единая оценка объекта (legacy); используйте ratings по сортам */
   rating?: VarietyRating;
+  // Оценка конкретного сорта в конкретном году (Спринт 6, шаг 6.2).
+  ratings?: Record<string, Exclude<VarietyRating, null>>;
   notes?: string;
 }
 
