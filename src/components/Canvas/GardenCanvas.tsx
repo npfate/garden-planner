@@ -407,11 +407,14 @@ export default function GardenCanvas() {
       // контролам НЕ должен создавать новый объект — перемещение/ресайз
       // обрабатывает сам Fabric.js (нативное поведение). Размещение внутри
       // грядки/парника разрешено всегда, но только для растений (см. ниже).
-      const downTarget = event.target as FabricObject | null | undefined;
-      // Подписи сортов, сетка и служебные объекты не участвуют в hit-тесте
-      if (downTarget && (isVarietyLabel(downTarget) || isGridObject(downTarget) || isBackgroundObject(downTarget))) {
-        return;
-      }
+      // Hit-тест с учётом Group-обёрток растений (шаг 6.4): при subTargetCheck
+      // off event.target у клика по эмодзи/подписи внутри группы равен null,
+      // поэтому цель ищем явно (findTarget возвращает саму группу).
+      const rawTarget = canvas.findTarget(event.e) as unknown as FabricObject | null;
+      const downTarget =
+        rawTarget && (isVarietyLabel(rawTarget) || isGridObject(rawTarget) || isBackgroundObject(rawTarget) || isTransplantLine(rawTarget))
+          ? null
+          : rawTarget;
       let placementParentId: string | null = null;
       if (downTarget && getGardenId(downTarget)) {
         const targetType = getObjectType(downTarget);
