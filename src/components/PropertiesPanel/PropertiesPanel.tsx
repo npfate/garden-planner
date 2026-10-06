@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { Move, Shovel, ThumbsDown, ThumbsUp, Trash2 } from 'lucide-react';
+import { Move, Plus, Shovel, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
 import { useGardenStore } from '../../store/gardenStore';
 import { getLibraryItem, getCategoryName } from '../../constants/objectLibrary';
 import type { PlantLifecycle, VarietyRating } from '../../types/garden';
@@ -35,6 +35,7 @@ const readonlyClass =
 
 export default function PropertiesPanel() {
   const [harvestInput, setHarvestInput] = useState('');
+  const [varietyInput, setVarietyInput] = useState('');
   const object = useGardenStore((s) => s.objects.find((item) => item.id === s.selectedObjectId) ?? null);
   const currentYear = useGardenStore((s) => s.currentYear);
   const updateObject = useGardenStore((s) => s.updateObject);
@@ -93,6 +94,24 @@ export default function PropertiesPanel() {
     addEvent(makeHarvestEvent(object.name, kg, total));
   };
 
+  // Сорта (плодовые деревья из Библиотеки: яблоня, груша и т.д.).
+  // Добавление/удаление обновляет object.varieties через updateObject.
+  const addVariety = (): void => {
+    const name = varietyInput.trim();
+    if (!name) return;
+    if (object.varieties.some((v) => v.name.toLowerCase() === name.toLowerCase())) {
+      setVarietyInput('');
+      return;
+    }
+    updateObject(object.id, {
+      varieties: [...object.varieties, { id: crypto.randomUUID(), name }],
+    });
+    setVarietyInput('');
+  };
+  const removeVariety = (id: string): void => {
+    updateObject(object.id, { varieties: object.varieties.filter((v) => v.id !== id) });
+  };
+
   // Пересадка одним действием: старая запись «выкапывается» в выбранную дату,
   // новая садится рядом со всеми сохранёнными свойствами (размер, тип, цикл).
   // Canvas подписан на событие garden:transplanted — добавит fabric-объект копии.
@@ -126,19 +145,22 @@ export default function PropertiesPanel() {
         </FieldRow>
 
         {/* Источник из Библиотеки объектов: показываем шаблон, по которому
-            создан экземпляр, и даём возможность отвязать связь. */}
+            создан экземпляр, агросправку шаблона и даём возможность отвязать связь. */}
         {(() => {
           const tpl = object.libraryItemId ? getLibraryItem(object.libraryItemId) : undefined;
           if (!tpl) return null;
+          const m = tpl.meta;
           return (
-            <FieldRow label="Шаблон (Библиотека)">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={`${tpl.name} · ${getCategoryName(tpl.category)}`}
-                  readOnly
-                  className={readonlyClass}
-                />
+            <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-3 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-emerald-700">
+                    Шаблон (Библиотека)
+                  </div>
+                  <div className="text-sm font-medium text-text-primary">
+                    {tpl.name} · {getCategoryName(tpl.category)}
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => updateObject(object.id, { libraryItemId: null })}
@@ -148,7 +170,40 @@ export default function PropertiesPanel() {
                   Отвязать
                 </button>
               </div>
-            </FieldRow>
+
+              {m?.description && (
+                <p className="text-xs leading-relaxed text-emerald-900">{m.description}</p>
+              )}
+
+              {m && (
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-emerald-900">
+                  {typeof m.heightM === 'number' && (
+                    <div className="flex gap-1">
+                      <dt className="text-emerald-700">Высота:</dt>
+                      <dd>{m.heightM} м</dd>
+                    </div>
+                  )}
+                  {typeof m.spacingM === 'number' && (
+                    <div className="flex gap-1">
+                      <dt className="text-emerald-700">Отступ:</dt>
+                      <dd>{m.spacingM} м</dd>
+                    </div>
+                  )}
+                  {m.frostResistance && (
+                    <div className="flex gap-1">
+                      <dt className="text-emerald-700">Зимостойкость:</dt>
+                      <dd>{m.frostResistance}</dd>
+                    </div>
+                  )}
+                  {m.ripening && (
+                    <div className="flex gap-1">
+                      <dt className="text-emerald-700">Сроки:</dt>
+                      <dd>{m.ripening}</dd>
+                    </div>
+                  )}
+                </dl>
+              )}
+            </div>
           );
         })()}
 
@@ -166,6 +221,56 @@ export default function PropertiesPanel() {
             />
           </FieldRow>
         )}
+
+        {/* Сорта: актуально для плодовых деревьев из Библиотеки (яблоня и т.п.),
+            но показываем для любого объекта — список ведёт пользователь. */}
+        <FieldRow label={`Сорта (${object.varieties.length})`}>
+          <div className="space-y-2">
+            {object.varieties.length > 0 && (
+              <ul className="space-y-1">
+                {object.varieties.map((v) => (
+                  <li
+                    key={v.id}
+                    className="flex items-center justify-between gap-2 rounded-md border border-border bg-white px-2 py-1 text-sm"
+                  >
+                    <span className="truncate">{v.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeVariety(v.id)}
+                      title="Удалить сорт"
+                      className="text-text-secondary hover:text-red-600 flex-shrink-0"
+                    >
+                      <X size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={varietyInput}
+                onChange={(event) => setVarietyInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addVariety();
+                  }
+                }}
+                placeholder="Название сорта"
+                className={inputClass}
+              />
+              <button
+                type="button"
+                onClick={addVariety}
+                title="Добавить сорт"
+                className="btn-primary h-9 !py-0 px-3 flex items-center gap-1 text-sm flex-shrink-0"
+              >
+                <Plus size={14} /> Добавить
+              </button>
+            </div>
+          </div>
+        </FieldRow>
 
         <FieldRow label="Год посадки">
           <input
