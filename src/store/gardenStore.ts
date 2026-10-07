@@ -6,10 +6,17 @@ import { filterVisible, makeEvent, momentOf } from '../utils/wayback';
 import { ACTIVITY_META } from '../config/activity';
 import { getLibraryItem, LIBRARY_ITEMS_FLAT } from '../constants/objectLibrary';
 
+// Ключ runtime-идентификатора схемы на fabric-объекте. ДОЛЖЕН совпадать с
+// GARDEN_ID_KEY в components/Canvas/fabricSync.ts. Раньше здесь был расхождение
+// в написании ключа — поиск объекта по id всегда возвращал undefined, и
+// focusOnObject из Инвентаря работал «по координатам» без реального выделения
+// (пользователь видел рамку от прошлого выделения, а клики «не срабатывали»).
+const GARDEN_ID_KEY = '__gardenObjectId';
+
 // Поиск fabric-объекта по garden-id. Локальный хелпер (в components/Canvas/fabricSync
 // такая же функция есть, но импорт оттуда создал бы цикл store -> components).
 function findFabricObjectByGardenId(canvas: FabricCanvas, id: string) {
-  return canvas.getObjects().find((o) => (o as unknown as Record<string, unknown>).__gardenObjectId === id);
+  return canvas.getObjects().find((o) => (o as unknown as Record<string, unknown>)[GARDEN_ID_KEY] === id);
 }
 
 // Инструменты тулбара + динамические инструменты размещения из Библиотеки
