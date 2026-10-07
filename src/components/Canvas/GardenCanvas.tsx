@@ -1,5 +1,5 @@
 import { Canvas, Point, Rect } from 'fabric';
-import type { TPointerEvent, TPointerEventInfo, FabricObject } from 'fabric';
+import type { TPointerEvent, TPointerEventInfo, FabricObject, BasicTransformEvent } from 'fabric';
 import { useEffect, useRef } from 'react';
 import { useGardenStore, useCanvasStore } from '../../store/gardenStore';
 import { isVisibleAt } from '../../utils/wayback';
@@ -14,6 +14,7 @@ import {
   drawGrid,
   drawTransplantHints,
   findObjectByGardenId,
+  getEffectiveGridStep,
   getObjectType,
   isTransplantLine,
   markAsCreatedOnCanvas,
@@ -230,7 +231,7 @@ export default function GardenCanvas() {
       const id = getGardenId(activeObj);
       // Snap to grid (если включён): финальная привязка позиции, размеров и угла.
       // Существующие объекты НЕ перестраиваются — только результат текущего действия.
-      const step = useCanvasStore.getState().snapToGrid ? Math.max(1, useCanvasStore.getState().gridStep * PIXELS_PER_METER) : 0;
+      const step = getEffectiveGridStep();
       if (step > 0 && !isBackgroundObject(activeObj) && !isTransplantLine(activeObj)) {
         const w = activeObj.width ?? 0;
         const h = activeObj.height ?? 0;
@@ -238,15 +239,23 @@ export default function GardenCanvas() {
         const sh = activeObj.getScaledHeight();
         const snappedW = Math.max(step, snapValue(sw));
         const snappedH = Math.max(step, snapValue(sh));
+        // Привязка к центру: объект «прилипает» центром к ближайшей точке сетки,
+        // поэтому left/top корректируются на половину размера. Без этого крупные
+        // объекты (теплицы, большие грядки) смещались бы на полразмера от сетки.
         activeObj.set({
-          left: snapValue(activeObj.left ?? 0),
-          top: snapValue(activeObj.top ?? 0),
+          left: snapValue((activeObj.left ?? 0) + sw / 2) - sw / 2,
+          top: snapValue((activeObj.top ?? 0) + sh / 2) - sh / 2,
           angle: snapValue(activeObj.angle ?? 0),
         });
         if (snappedW !== sw || snappedH !== sh) {
           activeObj.set({
             scaleX: snappedW / (w || 1),
             scaleY: snappedH / (h || 1),
+          });
+          // После изменения размеров перепривязываем центр уже к новым размерам.
+          activeObj.set({
+            left: snapValue((activeObj.left ?? 0) + snappedW / 2) - snappedW / 2,
+            top: snapValue((activeObj.top ?? 0) + snappedH / 2) - snappedH / 2,
           });
         }
         activeObj.setCoords();
@@ -285,14 +294,18 @@ export default function GardenCanvas() {
 
       const gs = useGardenStore.getState();
       const bedsCount = gs.objects.filter((o) => o.type === 'bed').length + 1;
+      // Snap to grid — опциональная фича (кнопка в Toolbar): при включённой
+      // привязке координаты и размеры новой грядки округляются до шага сетки;
+      // при выключенной — грядка остаётся в произвольном месте.
+      const snapOn = useCanvasStore.getState().snapToGrid;
       const entry = createGardenObjectEntry(
         'bed',
         `Грядка ${bedsCount}`,
         gs.currentYear,
-        left,
-        top,
-        width,
-        height,
+        snapOn ? snapValue(left) : left,
+        snapOn ? snapValue(top) : top,
+        snapOn ? Math.max(getEffectiveGridStep(), snapValue(width)) : Math.max(1, width),
+        snapOn ? Math.max(getEffectiveGridStep(), snapValue(height)) : Math.max(1, height),
         undefined,
         gs.viewDate ?? undefined, // wayback: посадка «в этот день», если выбрана дата просмотра
       );
@@ -587,15 +600,90 @@ export default function GardenCanvas() {
     canvas.on('selection:created', onSelectionChanged);
     canvas.on('selection:updated', onSelectionChanged);
     canvas.on('selection:cleared', () => selectByObject(null));
-    // Snap to grid при перемещении: «прилипаем» к сетке в реальном времени.
-    const onObjectMoving = (e: { target?: FabricObject | null }): void => {
+    // Snap to grid при перемещении: «прилипает» к сетке в реальном времени.
+    // Центр объекта привязывается к ближайшей точке сетки; модификатор Alt —
+    // временное отключение привязки внутри текущего действия.
+    const onObjectMoving = (e: { target?: FabricObject | null; e?: unknown }): void => {
       const obj = e.target;
       if (!obj) return;
-      if (!useCanvasStore.getState().snapToGrid) return;
       if (isBackgroundObject(obj) || isTransplantLine(obj)) return;
-      obj.set({ left: snapValue(obj.left ?? 0), top: snapValue(obj.top ?? 0) });
+      const rawEvt = e.e as PointerEvent | KeyboardEvent | undefined;
+      if (rawEvt && 'altKey' in rawEvt && rawEvt.altKey) return;
+      const step = getEffectiveGridStep();
+      if (!step) return;
+      const sw = obj.getScaledWidth();
+      const sh = obj.getScaledHeight();
+      obj.set({
+        left: snapValue((obj.left ?? 0) + sw / 2) - sw / 2,
+        top: snapValue((obj.top ?? 0) + sh / 2) - sh / 2,
+      });
     };
     canvas.on('object:moving', onObjectMoving);
+    // Snap при изменении размера: габариты округляются до кратных шагу сетки
+    // в реальном времени. Неподвижный противоположный угол (origin трансформации)
+    // остаётся на месте — объект растёт «от» него, как при обычном drag'е.
+    const onObjectScaling = (opt: BasicTransformEvent<TPointerEvent>): void => {
+      // В рантайме Fabric заполняет transform числами (координаты точки фиксации),
+      // хотя в типах originX/originY — строковые 'left'|'center'|… .
+      const tr = opt.transform as unknown as {
+        target?: FabricObject;
+        corner?: string;
+        originX?: number;
+        originY?: number;
+        original?: { width: number; height: number };
+      } | undefined;
+      const obj = tr?.target;
+      if (!obj || !tr || !tr.corner || !tr.original) return;
+      if (isBackgroundObject(obj) || isTransplantLine(obj)) return;
+      const rawEvt = opt.e as PointerEvent | undefined;
+      if (rawEvt?.altKey) return;
+      const step = getEffectiveGridStep();
+      if (!step) return;
+
+      const pointer = canvas.getScenePoint(opt.e);
+      // Вектор от неподвижного угла к курсору — в локальных осях объекта
+      // (с учётом угла поворота), как это делает сам Fabric.js.
+      let dx = pointer.x - (tr.originX ?? 0);
+      let dy = pointer.y - (tr.originY ?? 0);
+      const ang = obj.angle ?? 0;
+      if (ang) {
+        const rad = (-ang * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const px = dx;
+        const py = dy;
+        dx = px * cos - py * sin;
+        dy = px * sin + py * cos;
+      }
+      const wSign = tr.corner.includes('l') ? -1 : tr.corner.includes('r') ? 1 : 0;
+      const hSign = tr.corner.includes('t') ? -1 : tr.corner.includes('b') ? 1 : 0;
+      const baseW = tr.original.width;
+      const baseH = tr.original.height;
+      const newW = wSign !== 0 ? Math.max(step, snapValue(Math.abs(dx)) || step) : (obj.scaleX ?? 1) * baseW;
+      const newH = hSign !== 0 ? Math.max(step, snapValue(Math.abs(dy)) || step) : (obj.scaleY ?? 1) * baseH;
+      obj.set({ scaleX: newW / baseW, scaleY: newH / baseH });
+
+      // Позиционируем объект так, чтобы его локальный угол (wSign,hSign)
+      // совпал с неподвижной точкой origin.
+      const halfW = newW / 2;
+      const halfH = newH / 2;
+      let cx = (tr.originX ?? 0) + (wSign * halfW);
+      let cy = (tr.originY ?? 0) + (hSign * halfH);
+      if (ang) {
+        // смещение от центра к углу в мировых координатах (противоположный поворот)
+        const rad = (ang * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const ux = wSign * halfW;
+        const uy = hSign * halfH;
+        cx = (tr.originX ?? 0) + (ux * cos - uy * sin);
+        cy = (tr.originY ?? 0) + (ux * sin + uy * cos);
+      }
+      obj.set({ left: cx, top: cy });
+      obj.setCoords();
+      canvas.requestRenderAll();
+    };
+    canvas.on('object:scaling', onObjectScaling);
     canvas.on('object:modified', onObjectModified);
 
     window.addEventListener('keydown', handleEscape);
