@@ -350,6 +350,48 @@ export function getSnapPoint(x: number, y: number): { x: number; y: number } {
   };
 }
 
+// Привязка центра повёрнутого объекта к сетке.
+// При угле, кратном 90°, габариты swapped-прямоугольника (bounding box) кратны
+// шагу тогда и только тогда, когда центр лежит на точке сетки. Поэтому для таких
+// углов привязываем именно ЦЕНТР: left/top корректируются на половины габаритов
+// bounding box, а не собственных размеров — иначе при повороте на 90/270° w/h
+// меняются местами и объект «уезжал» от сетки на половину разницы размеров.
+// Для произвольных углов (45° и т.п.) точная привязка к сетке невозможна —
+// оставляем прежнюю логику (центр привязан, left/top скорректированы на свои размеры).
+export function snapObjectToGrid(
+  obj: FabricObject,
+): { left: number; top: number } | null {
+  const step = getEffectiveGridStep();
+  if (!step) return null;
+  const angle = obj.angle ?? 0;
+  // Нормализуем угол к [0, 360) и проверяем кратность 90°.
+  const norm = ((Math.round(angle) % 360) + 360) % 360;
+  // Фактический центр объекта в координатах сцены: для originX/Y='left'/'top'
+  // это (left + w/2, top + h/2); для 'center'/'center' — сами left/top.
+  // Вращение в fabric идёт вокруг центра, поэтому формула не зависит от угла.
+  const sw = obj.getScaledWidth();
+  const sh = obj.getScaledHeight();
+  const offX = obj.originX === 'center' ? 0 : obj.originX === 'right' ? -sw / 2 : sw / 2;
+  const offY = obj.originY === 'center' ? 0 : obj.originY === 'bottom' ? -sh / 2 : sh / 2;
+  const cx = (obj.left ?? 0) + offX;
+  const cy = (obj.top ?? 0) + offY;
+  const snappedCx = Math.round(cx / step) * step;
+  const snappedCy = Math.round(cy / step) * step;
+  if (norm % 90 === 0) {
+    // Габариты bounding box: при 90/270 собственные w/h меняются местами.
+    const gw = norm === 90 || norm === 270 ? sh : sw;
+    const gh = norm === 90 || norm === 270 ? sw : sh;
+    return {
+      left: snappedCx - gw / 2 - offX,
+      top: snappedCy - gh / 2 - offY,
+    };
+  }
+  return {
+    left: snappedCx - offX,
+    top: snappedCy - offY,
+  };
+}
+
 // Отрисовка слоя сетки (группа линий, задний план). Шаг — в метрах.
 export function drawGrid(canvas: FabricCanvas, gridStepMeters: number): void {
   const width = canvas.getWidth();

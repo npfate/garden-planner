@@ -21,6 +21,7 @@ import {
   reconcileObjectsWithStore,
   getGardenId,
   getSnapPoint,
+  snapObjectToGrid,
   snapValue,
   isBackgroundObject,
   loadBackgroundImage,
@@ -231,33 +232,37 @@ export default function GardenCanvas() {
       const id = getGardenId(activeObj);
       // Snap to grid (если включён): финальная привязка позиции, размеров и угла.
       // Существующие объекты НЕ перестраиваются — только результат текущего действия.
+      // ВАЖНО: учёт угла поворота — при угле, кратном 90°, собственные размеры
+      // объекта меняются местами в мировых осях (w↔h), поэтому left/top раньше
+      // корректировались на «не те» половины и объект уезжал от сетки на
+      // (h−w)/2. Привязка идёт по ЦЕНТРУ bounding box через snapObjectToGrid,
+      // а размеры округляются в локальных осях объекта.
       const step = getEffectiveGridStep();
       if (step > 0 && !isBackgroundObject(activeObj) && !isTransplantLine(activeObj)) {
         const w = activeObj.width ?? 0;
         const h = activeObj.height ?? 0;
-        const sw = activeObj.getScaledWidth();
-        const sh = activeObj.getScaledHeight();
-        const snappedW = Math.max(step, snapValue(sw));
-        const snappedH = Math.max(step, snapValue(sh));
-        // Привязка к центру: объект «прилипает» центром к ближайшей точке сетки,
-        // поэтому left/top корректируются на половину размера. Без этого крупные
-        // объекты (теплицы, большие грядки) смещались бы на полразмера от сетки.
-        activeObj.set({
-          left: snapValue((activeObj.left ?? 0) + sw / 2) - sw / 2,
-          top: snapValue((activeObj.top ?? 0) + sh / 2) - sh / 2,
-          angle: snapValue(activeObj.angle ?? 0),
-        });
-        if (snappedW !== sw || snappedH !== sh) {
-          activeObj.set({
-            scaleX: snappedW / (w || 1),
-            scaleY: snappedH / (h || 1),
-          });
-          // После изменения размеров перепривязываем центр уже к новым размерам.
-          activeObj.set({
-            left: snapValue((activeObj.left ?? 0) + snappedW / 2) - snappedW / 2,
-            top: snapValue((activeObj.top ?? 0) + snappedH / 2) - snappedH / 2,
-          });
+        const angle = activeObj.angle ?? 0;
+        // Угол: если он кратен 90° с небольшим дрейфом (float-погрешность drag'а) —
+        // щёлкаем строго к кратному 90°, чтобы прямоугольник ровно ложился в сетку.
+        const nearest90 = Math.round(angle / 90) * 90;
+        if (Math.abs(angle - nearest90) <= 1) {
+          activeObj.set({ angle: ((nearest90 % 360) + 360) % 360 });
         }
+        const norm = ((Math.round(activeObj.angle ?? 0) % 360) + 360) % 360;
+        const swapped = norm === 90 || norm === 270;
+
+        // Габариты объекта в его ЛОКАЛЬНЫХ осях (до учёта поворота): при 90/270
+        // мировые ширина/высота меняются местами, поэтому берём scaledHeight как
+        // локальную ширину и наоборот — иначе размеры округлялись «не в ту ось».
+        const localW = swapped ? activeObj.getScaledHeight() : activeObj.getScaledWidth();
+        const localH = swapped ? activeObj.getScaledWidth() : activeObj.getScaledHeight();
+        const snappedLocalW = Math.max(step, snapValue(localW));
+        const snappedLocalH = Math.max(step, snapValue(localH));
+
+        activeObj.set({ scaleX: snappedLocalW / (w || 1), scaleY: snappedLocalH / (h || 1) });
+        activeObj.setCoords();
+        const pos = snapObjectToGrid(activeObj);
+        if (pos) activeObj.set(pos);
         activeObj.setCoords();
         canvas.requestRenderAll();
       }
@@ -603,20 +608,18 @@ export default function GardenCanvas() {
     // Snap to grid при перемещении: «прилипает» к сетке в реальном времени.
     // Центр объекта привязывается к ближайшей точке сетки; модификатор Alt —
     // временное отключение привязки внутри текущего действия.
+    // ВАЖНО: при угле, кратном 90°, left/top корректируются на половины
+    // bounding box (w↔h меняются местами) — иначе повёрнутый прямоугольник
+    // при перемещении уезжал от сетки на половину разницы размеров.
     const onObjectMoving = (e: { target?: FabricObject | null; e?: unknown }): void => {
       const obj = e.target;
       if (!obj) return;
       if (isBackgroundObject(obj) || isTransplantLine(obj)) return;
       const rawEvt = e.e as PointerEvent | KeyboardEvent | undefined;
       if (rawEvt && 'altKey' in rawEvt && rawEvt.altKey) return;
-      const step = getEffectiveGridStep();
-      if (!step) return;
-      const sw = obj.getScaledWidth();
-      const sh = obj.getScaledHeight();
-      obj.set({
-        left: snapValue((obj.left ?? 0) + sw / 2) - sw / 2,
-        top: snapValue((obj.top ?? 0) + sh / 2) - sh / 2,
-      });
+      const pos = snapObjectToGrid(obj);
+      if (!pos) return;
+      obj.set(pos);
     };
     canvas.on('object:moving', onObjectMoving);
     // Snap при изменении размера: габариты округляются до кратных шагу сетки
