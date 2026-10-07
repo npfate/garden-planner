@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Защита .gitignore от случайной очистки/перезаписи.
+# Запрещает коммитить пустой или урезанный .gitignore, а также его удаление.
+
+set -u
+
+if git diff --cached --diff-filter=D --name-only | grep -qx '.gitignore'; then
+  echo "✖ pre-commit: .gitignore удалён из индекса — коммит запрещён." >&2
+  exit 1
+fi
+
+if git diff --cached --name-only | grep -qx '.gitignore'; then
+  content="$(git show :.gitignore 2>/dev/null)"
+  lines=$(printf '%s\n' "$content" | grep -cve '^[[:space:]]*$')
+
+  if [ "$lines" -lt 5 ]; then
+    echo "✖ pre-commit: .gitignore в индексе пуст или подозрительно мал ($lines непустых строк)." >&2
+    echo "  Похоже на случайную перезапись. Восстановите версию из HEAD:" >&2
+    echo "  git restore --source=HEAD --staged --worktree .gitignore" >&2
+    exit 1
+  fi
+
+  for entry in node_modules dist ".secrets/"; do
+    if ! printf '%s\n' "$content" | grep -qxF "$entry"; then
+      echo "✖ pre-commit: в .gitignore отсутствует обязательная строка '$entry'." >&2
+      exit 1
+    fi
+  done
+fi
+
+exit 0
