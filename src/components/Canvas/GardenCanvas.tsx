@@ -558,13 +558,37 @@ export default function GardenCanvas() {
     };
 
     const deleteSelected = (): void => {
+      // Поддержка мультивыделения: при рамочном/Shift-выделении Fabric создаёт
+      // ActiveObject (type 'activeSelection'), внутри которого лежат все выбранные
+      // объекты. Удаляем каждый из них («выкопка», soft-delete), иначе удалялся бы
+      // только один объект, а группа молча исчезала с canvas без изменений в store.
+      const isRemovable = (obj: FabricObject): boolean =>
+        !isBackgroundObject(obj) && !isTransplantLine(obj) && !!getGardenId(obj);
+
       const activeObj = canvas.getActiveObject();
       if (!activeObj) return;
-      const id = getGardenId(activeObj);
-      if (!id) return;
-      // Клавиша Delete — «выкопка» (soft-delete): объект остаётся в истории.
-      useGardenStore.getState().removeObject(id);
-      canvas.remove(activeObj);
+
+      const targets: FabricObject[] =
+        activeObj.type === 'activeSelection'
+          ? (activeObj as unknown as { getObjects: () => FabricObject[] })
+              .getObjects()
+              .filter(isRemovable)
+          : isRemovable(activeObj)
+            ? [activeObj]
+            : [];
+
+      if (targets.length === 0) return;
+
+      const removeObject = useGardenStore.getState().removeObject;
+      for (const obj of targets) {
+        const id = getGardenId(obj);
+        if (!id) continue;
+        // Клавиша Delete — «выкопка» (soft-delete): объект остаётся в истории.
+        removeObject(id);
+        canvas.remove(obj);
+      }
+      canvas.discardActiveObject();
+      selectByObject(null);
       canvas.renderAll();
     };
 
