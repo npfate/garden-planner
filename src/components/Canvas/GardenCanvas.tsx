@@ -613,42 +613,52 @@ export default function GardenCanvas() {
 
       if (targets.length === 0) return;
 
-      // ВАЖНО (баг «нажал DEL — объекты не удалились, рамка осталась, дальше
-      // ничего не выделяется»): в fabric v7 (RealClickCursorBehavior) дети
-      // ActiveSelection НЕ хранятся отдельно в canvas._objects — при
-      // формировании группы оригиналы забираются в группу (enterGroup), а
-      // canvas.remove(child) для ребёнка группы — молчаливый no-op (сигнатура
-      // remove(...objects) ничего не возвращает и не ругается). В итоге после
-      // discardActiveObject() объекты продолжали отрисовываться внутри
-      // «мёртвой» группы, а её stale-координаты ломали hit-testing — canvas
-      // выглядел «некликабельным».
+      // ВАЖНО (баг «нажал DEL — объекты не исчезли, при перемотке даты
+      // сместились вправо-вниз, выделение осталось, дальше ничего не
+      // выделяется»). Две причины:
       //
-      // Правильный порядок:
-      // 1) snapshot целевых объектов ДО сброса выделения (после
-      //    discardActiveObject() группа опустошается и ссылки теряются);
-      // 2) canvas.discardActiveObject() + selectByObject(null) — до изменений
-      //    стора, иначе подписка на visibleIds запускает
-      //    reconcileObjectsWithStore, который видит живую ActiveSelection /
-      //    selectedObjectId и возвращает удалённые объекты на canvas
-      //    («объекты ожили при перемотке даты», «рамки остались»);
-      // 3) canvas.remove(...targets) — теперь цели уже НЕ дети группы
-      //    (группа пуста), поэтому remove реально вырезает их из
-      //    canvas._objects;
-      // 4) removeObject(id) — soft-delete («выкопка») в Zustand-store по
-      //    текущей viewDate;
-      // 5) renderAll() — синхронная финальная перерисовка.
+      // 1) ПОРЯДОК ОПЕРАЦИЙ. В fabric v7 discardActiveObject() вызывает
+      //    ActiveSelection.onDeselect() -> removeAll(): все дети группы
+      //    возвращаются в canvas._objects (с применённой трансформацией
+      //    группы). Если store к этому моменту уже изменён (объекты
+      //    «удалены»), подписка на visibleIds запускает reconcile, который
+      //    видит живые объекты на canvas без ссылок в store — и наоборот,
+      //    если remove(...) выполнялся, когда дети ещё были внутри группы,
+      //    indexOf в canvas._objects их не находил (molчаливый no-op), а
+      //    последующий removeAll() возвращал их обратно как «фантомов».
+      //    Отсюда несинхронные рамки выделения и «прыжок вправо-вниз» при
+      //    перемотке дня (пересоздание из store по старым x/y).
+      //    Решение: сначала discardActiveObject() (дети уже в _objects),
+      //    затем сразу canvas.remove(...targets) (теперь indexOf их находит
+      //    и реально вырезает), и только потом трогаем store.
+      //
+      // 2) СЕМАНТИКА УДАЛЕНИЯ. removeObject — это «выкопка» (soft-delete):
+      //    removedAt = текущая дата просмотра, а по правилу wayback в сам
+      //    день выкопки объект ещё виден (removedAt < now — строго меньше).
+      //    Поэтому после DEL объекты оставались и на схеме, и в инвентаре
+      //    вплоть до следующего дня. Клавиша Delete должна убирать объект
+      //    немедленно везде — используем destroyObject (полное удаление во
+      //    всех временных срезах); «выкопка с сохранением в истории»
+      //    доступна отдельным действием в панели свойств.
       const toRemove = [...targets];
 
+      // 1) Сбрасываем выделение: onDeselect возвращает детей в
+      //    canvas._objects на их реальных координатах.
       canvas.discardActiveObject();
-      selectByObject(null);
+      // 2) Вырезаем цели из canvas — теперь они топ-левел элементы
+      //    _objects и indexOf их находит (пока дети в группе — no-op).
       canvas.remove(...toRemove);
-
-      const removeObject = useGardenStore.getState().removeObject;
+      // 3) Чистим store ПОСЛЕ canvas: ни одна подписка на visibleIds не
+      //    должна увидеть фантомные объекты.
+      selectByObject(null);
+      const destroyObject = useGardenStore.getState().destroyObject;
       for (const obj of toRemove) {
         const id = getGardenId(obj);
         if (!id) continue;
-        // Клавиша Delete — «выкопка» (soft-delete): объект остаётся в истории.
-        removeObject(id);
+        // Клавиша Delete — полное удаление объекта (со схемы И из
+        // инвентаря, во всех временных срезах). Для «выкопки с историей»
+        // используется отдельное действие в панели свойств.
+        destroyObject(id);
       }
       canvas.renderAll();
     };
