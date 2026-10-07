@@ -289,15 +289,29 @@ export function reconcileObjectsWithStore(canvas: FabricCanvas): void {
     }
   }
 
-  // Сохраняем выделение, если объект всё ещё виден
-  const selectedId = state.selectedObjectId;
-  const visibleSelected =
-    selectedId && visible.find((o) => o.id === selectedId && isVisibleInYear(o, currentYear));
-  if (visibleSelected) {
-    const obj = findObjectByGardenId(canvas, selectedId as string);
-    if (obj) canvas.setActiveObject(obj);
-  } else if (selectedId) {
-    useGardenStore.getState().selectObject(null);
+  // Сохраняем выделение, если объект всё ещё виден.
+  // ВАЖНО: если на canvas сейчас активна группа мультивыделения
+  // (activeSelection), reconcile НЕ должен её трогать — иначе
+  // setActiveObject(один объект) «вырывает» этот объект из ActiveSelection
+  // и возвращает его обратно на canvas даже после удаления (баг: рамки
+  // выделения остаются, удалённые объекты «оживают» при перемотке даты).
+  const activeObj = canvas.getActiveObject();
+  if (activeObj && activeObj.type === 'activeSelection') {
+    // Группа мультивыделения не переживает reconcile: снимам её целиком.
+    // Удалённые объекты уже убраны с canvas выше — если этого не сделать,
+    // setActiveObject(один объект) «вырвёт» его из ActiveSelection и вернёт
+    // на canvas даже после удаления (рамки выделения останутся висеть).
+    canvas.discardActiveObject();
+  } else {
+    const selectedId = state.selectedObjectId;
+    const visibleSelected =
+      selectedId && visible.find((o) => o.id === selectedId && isVisibleInYear(o, currentYear));
+    if (visibleSelected) {
+      const obj = findObjectByGardenId(canvas, selectedId as string);
+      if (obj && obj !== activeObj) canvas.setActiveObject(obj);
+    } else if (selectedId) {
+      useGardenStore.getState().selectObject(null);
+    }
   }
 
   // Пунктирные подсказки пересадки (стрелка + «призрак» прежнего места) —

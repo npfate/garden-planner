@@ -226,9 +226,43 @@ export default function GardenCanvas() {
       selectByObject(activeObj);
     };
 
+    // Синхронизация позиции одного fabric-объекта в store (после snap-коррекции).
+    const syncOneToStore = (obj: FabricObject): void => {
+      const objectId = getGardenId(obj);
+      if (!objectId) return;
+      useGardenStore.getState().updateObject(objectId, {
+        x: obj.left ?? 0,
+        y: obj.top ?? 0,
+        width: obj.getScaledWidth(),
+        height: obj.getScaledHeight(),
+        rotation: obj.angle ?? 0,
+      });
+    };
+
     const onObjectModified = (): void => {
       const activeObj = canvas.getActiveObject();
       if (!activeObj) return;
+
+      // Мультивыделение: финальный snap всей группы по центру + сохранение
+      // позиций КАЖДОГО объекта в store. Иначе после reconcile объекты
+      // «возвращались» на старые координаты (store не знал о перемещении).
+      if (activeObj.type === 'activeSelection') {
+        if (!isBackgroundObject(activeObj) && !isTransplantLine(activeObj)) {
+          const step = getEffectiveGridStep();
+          if (step > 0) {
+            const pos = snapObjectToGrid(activeObj);
+            if (pos) activeObj.set(pos);
+            activeObj.setCoords();
+          }
+        }
+        const members = (activeObj as unknown as { getObjects: () => FabricObject[] })
+          .getObjects()
+          .filter((o) => !isBackgroundObject(o) && !isTransplantLine(o));
+        for (const m of members) syncOneToStore(m);
+        canvas.requestRenderAll();
+        return;
+      }
+
       const id = getGardenId(activeObj);
       // Snap to grid (если включён): финальная привязка позиции, размеров и угла.
       // Существующие объекты НЕ перестраиваются — только результат текущего действия.
@@ -579,6 +613,16 @@ export default function GardenCanvas() {
 
       if (targets.length === 0) return;
 
+      // Сначала снимаем выделение (activeSelection + selectedObjectId), а уже
+      // потом удаляем объекты. Иначе сторе-подписка на visibleIds запускает
+      // reconcileObjectsWithStore, который видит selectedObjectId и вызывает
+      // setActiveObject(объект): он возвращает удалённый объект обратно на
+      // canvas («объекты ожили при перемотке даты») и рисует рамки выделения
+      // вокруг мёртвых объектов («рамки остались, кликнуть нельзя»).
+      canvas.discardActiveObject();
+      selectByObject(null);
+      canvas.requestRenderAll();
+
       const removeObject = useGardenStore.getState().removeObject;
       for (const obj of targets) {
         const id = getGardenId(obj);
@@ -587,9 +631,7 @@ export default function GardenCanvas() {
         removeObject(id);
         canvas.remove(obj);
       }
-      canvas.discardActiveObject();
-      selectByObject(null);
-      canvas.renderAll();
+      canvas.requestRenderAll();
     };
 
     // Пересадка из панели свойств: старая запись выкапывается, новая садится
@@ -641,6 +683,13 @@ export default function GardenCanvas() {
       if (isBackgroundObject(obj) || isTransplantLine(obj)) return;
       const rawEvt = e.e as PointerEvent | KeyboardEvent | undefined;
       if (rawEvt && 'altKey' in rawEvt && rawEvt.altKey) return;
+      // Мультивыделение (ActiveSelection): привязка к сетке всей группы по её
+      // общему центру — иначе группа игнорировала snap entirely.
+      if (obj.type === 'activeSelection') {
+        const pos = snapObjectToGrid(obj);
+        if (pos) obj.set(pos);
+        return;
+      }
       const pos = snapObjectToGrid(obj);
       if (!pos) return;
       obj.set(pos);
