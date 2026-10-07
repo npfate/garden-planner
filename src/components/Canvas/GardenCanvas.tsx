@@ -613,25 +613,44 @@ export default function GardenCanvas() {
 
       if (targets.length === 0) return;
 
-      // Сначала снимаем выделение (activeSelection + selectedObjectId), а уже
-      // потом удаляем объекты. Иначе сторе-подписка на visibleIds запускает
-      // reconcileObjectsWithStore, который видит selectedObjectId и вызывает
-      // setActiveObject(объект): он возвращает удалённый объект обратно на
-      // canvas («объекты ожили при перемотке даты») и рисует рамки выделения
-      // вокруг мёртвых объектов («рамки остались, кликнуть нельзя»).
+      // ВАЖНО (баг «нажал DEL — объекты не удалились, рамка осталась, дальше
+      // ничего не выделяется»): в fabric v7 (RealClickCursorBehavior) дети
+      // ActiveSelection НЕ хранятся отдельно в canvas._objects — при
+      // формировании группы оригиналы забираются в группу (enterGroup), а
+      // canvas.remove(child) для ребёнка группы — молчаливый no-op (сигнатура
+      // remove(...objects) ничего не возвращает и не ругается). В итоге после
+      // discardActiveObject() объекты продолжали отрисовываться внутри
+      // «мёртвой» группы, а её stale-координаты ломали hit-testing — canvas
+      // выглядел «некликабельным».
+      //
+      // Правильный порядок:
+      // 1) snapshot целевых объектов ДО сброса выделения (после
+      //    discardActiveObject() группа опустошается и ссылки теряются);
+      // 2) canvas.discardActiveObject() + selectByObject(null) — до изменений
+      //    стора, иначе подписка на visibleIds запускает
+      //    reconcileObjectsWithStore, который видит живую ActiveSelection /
+      //    selectedObjectId и возвращает удалённые объекты на canvas
+      //    («объекты ожили при перемотке даты», «рамки остались»);
+      // 3) canvas.remove(...targets) — теперь цели уже НЕ дети группы
+      //    (группа пуста), поэтому remove реально вырезает их из
+      //    canvas._objects;
+      // 4) removeObject(id) — soft-delete («выкопка») в Zustand-store по
+      //    текущей viewDate;
+      // 5) renderAll() — синхронная финальная перерисовка.
+      const toRemove = [...targets];
+
       canvas.discardActiveObject();
       selectByObject(null);
-      canvas.requestRenderAll();
+      canvas.remove(...toRemove);
 
       const removeObject = useGardenStore.getState().removeObject;
-      for (const obj of targets) {
+      for (const obj of toRemove) {
         const id = getGardenId(obj);
         if (!id) continue;
         // Клавиша Delete — «выкопка» (soft-delete): объект остаётся в истории.
         removeObject(id);
-        canvas.remove(obj);
       }
-      canvas.requestRenderAll();
+      canvas.renderAll();
     };
 
     // Пересадка из панели свойств: старая запись выкапывается, новая садится
